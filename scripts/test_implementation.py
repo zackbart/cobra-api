@@ -94,6 +94,31 @@ def test_health_effects_with_source():
         print("Health-effects with source=code_comparison: OK")
 
 
+def test_health_effects_accepts_full_state_name():
+    """Verify full state names (not just abbreviations) resolve correctly."""
+    with patch("main.run_scenario", AsyncMock(return_value="mock-token")), patch(
+        "main.get_result", AsyncMock(return_value=MOCK_RESULT)
+    ):
+        from main import app
+
+        client = TestClient(app)
+        resp = client.post(
+            "/health-effects?include_health_endpoints=true",
+            json={
+                "state": "Arkansas",
+                "county_name": "Benton County",
+                "emissions_by_fuel": {
+                    "grid": {"PM25": 0.1, "SO2": 0, "NOx": 0, "VOC": 0},
+                },
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "county" in data
+        assert "grid" in data["county"]["by_sector"]
+        print("Health-effects with full state name: OK")
+
+
 def test_store_and_fetch():
     """Verify store-results and latest-results round-trip."""
     with patch("main.run_scenario", AsyncMock(return_value="t")), patch(
@@ -132,5 +157,6 @@ def test_store_and_fetch():
 if __name__ == "__main__":
     test_api_response_shape()
     test_health_effects_with_source()
+    test_health_effects_accepts_full_state_name()
     test_store_and_fetch()
     print("All checks passed.")

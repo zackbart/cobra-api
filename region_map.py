@@ -13,6 +13,22 @@ STATE_TO_FIPS = {
     "WV": "54", "WI": "55", "WY": "56", "PR": "72",
 }
 
+# Full state/territory name -> state abbreviation
+STATE_NAME_TO_ABBREV = {
+    "ALABAMA": "AL", "ALASKA": "AK", "ARIZONA": "AZ", "ARKANSAS": "AR", "CALIFORNIA": "CA",
+    "COLORADO": "CO", "CONNECTICUT": "CT", "DELAWARE": "DE", "DISTRICT OF COLUMBIA": "DC",
+    "FLORIDA": "FL", "GEORGIA": "GA", "HAWAII": "HI", "IDAHO": "ID", "ILLINOIS": "IL",
+    "INDIANA": "IN", "IOWA": "IA", "KANSAS": "KS", "KENTUCKY": "KY", "LOUISIANA": "LA",
+    "MAINE": "ME", "MARYLAND": "MD", "MASSACHUSETTS": "MA", "MICHIGAN": "MI", "MINNESOTA": "MN",
+    "MISSISSIPPI": "MS", "MISSOURI": "MO", "MONTANA": "MT", "NEBRASKA": "NE", "NEVADA": "NV",
+    "NEW HAMPSHIRE": "NH", "NEW JERSEY": "NJ", "NEW MEXICO": "NM", "NEW YORK": "NY",
+    "NORTH CAROLINA": "NC", "NORTH DAKOTA": "ND", "OHIO": "OH", "OKLAHOMA": "OK", "OREGON": "OR",
+    "PENNSYLVANIA": "PA", "RHODE ISLAND": "RI", "SOUTH CAROLINA": "SC", "SOUTH DAKOTA": "SD",
+    "TENNESSEE": "TN", "TEXAS": "TX", "UTAH": "UT", "VERMONT": "VT", "VIRGINIA": "VA",
+    "WASHINGTON": "WA", "WEST VIRGINIA": "WV", "WISCONSIN": "WI", "WYOMING": "WY",
+    "PUERTO RICO": "PR",
+}
+
 # eGRID subregion acronym -> 2-digit state FIPS (primary state for multi-state regions)
 EGRID_TO_FIPS = {
     "AKGD": "02",   # ASCC Alaska Grid
@@ -48,6 +64,16 @@ EGRID_TO_FIPS = {
 NATIONAL_ALIASES = {"national", "usa", "00", "us", "fipsst", "pstatabb"}
 
 
+def normalize_state_abbrev(value: str) -> str | None:
+    """Normalize state input to 2-letter abbreviation when possible."""
+    if value is None:
+        return None
+    v = value.strip().upper()
+    if v in STATE_TO_FIPS:
+        return v
+    return STATE_NAME_TO_ABBREV.get(v)
+
+
 def region_to_fips(region: str) -> str:
     """
     Convert dashboard region to COBRA FIPS.
@@ -66,9 +92,10 @@ def region_to_fips(region: str) -> str:
     if len(r) == 5 and r.isdigit():
         return r  # County FIPS - preserve full 5 digits
 
-    # State abbreviation
-    if r in STATE_TO_FIPS:
-        return STATE_TO_FIPS[r]
+    # State abbreviation or full state name
+    state_abbrev = normalize_state_abbrev(r)
+    if state_abbrev:
+        return STATE_TO_FIPS[state_abbrev]
 
     # eGRID subregion
     if r in EGRID_TO_FIPS:
@@ -120,8 +147,8 @@ def resolve_state_county(state: str, county_name: str) -> str:
     """
     from county_fips import resolve_county_fips
 
-    st = state.strip().upper()
-    if st not in STATE_TO_FIPS:
+    st = normalize_state_abbrev(state)
+    if st is None:
         raise ValueError(f"Unknown state: {state}")
 
     fips = resolve_county_fips(st, county_name)

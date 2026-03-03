@@ -70,7 +70,10 @@ async def health_effects(
             fips = resolve_state_county(req.state, req.county_name)
         except ValueError:
             # County not found — fall back to state-level
-            fips = region_to_fips(req.state)
+            try:
+                fips = region_to_fips(req.state)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
     elif req.state:
         try:
             fips = region_to_fips(req.state)
