@@ -1,0 +1,40 @@
+/* Shared styles for COBRA Tableau extensions */
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  margin: 0; padding: 16px; color: #333; background: #fafafa;
+}
+.intro { font-size: 13px; color: #555; margin-bottom: 14px; line-height: 1.4; }
+.btn-row { margin: 14px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+button {
+  padding: 8px 14px; font-size: 13px; font-weight: 500; cursor: pointer; border-radius: 4px;
+  border: 1px solid #bbb; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+button:hover { background: #f8f8f8; }
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+button.primary { background: #4a7c59; color: #fff; border-color: #3d6a4a; }
+button.primary:hover { background: #3d6a4a; }
+.results-box {
+  padding: 14px 16px; border-radius: 4px; margin-bottom: 10px;
+  background: #e8e8ed; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.results-box.teal { background: #e8f0ed; }
+.results-box.beige { background: #f5f0e6; }
+.geo-toggle { margin-bottom: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+.geo-toggle button { padding: 6px 12px; font-size: 12px; }
+.geo-toggle button.active { background: #4a7c59; color: #fff; border-color: #3d6a4a; }
+.result-row { margin: 8px 0; font-size: 14px; }
+.result-row strong { display: inline-block; min-width: 180px; }
+.result-row .val { font-weight: 600; color: #1a5f2a; }
+.loading { color: #666; font-size: 13px; }
+.error { color: #c00; font-size: 13px; }
+.health-table { width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 12px; }
+.health-table th, .health-table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #ddd; }
+.health-table th { font-weight: 600; background: rgba(0,0,0,0.04); }
+.health-table .num { text-align: right; }
+.health-table .category-header td { font-weight: 700; background: rgba(0,0,0,0.06); border-top: 2px solid #ccc; }
+.sector-breakdown { margin-top: 12px; padding: 10px 14px; background: #f5f0e6; border-radius: 4px; }
+.sector-breakdown h4 { margin: 0 0 8px; font-size: 13px; }
+.status-msg { padding: 10px 14px; border-radius: 4px; margin-bottom: 10px; font-size: 13px; }
+.status-msg.success { background: #e8f0ed; color: #2a6f3a; }
+.status-msg.info { background: #e8e8ed; color: #555; }

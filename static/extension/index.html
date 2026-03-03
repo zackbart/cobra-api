@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>COBRA Health Results</title>
+  <script src="https://extensions.tableauusercontent.com/resources/tableau.extensions.1.latest.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; color: #333; background: #fafafa; }
+    .intro { font-size: 13px; color: #555; margin-bottom: 14px; line-height: 1.4; }
+    .input-group { margin-bottom: 12px; }
+    .input-group label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; color: #333; }
+    input, select {
+      width: 100%; max-width: 220px; padding: 8px 10px; font-size: 13px;
+      border: 1px solid #ccc; border-radius: 4px; background: #fff;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    input:focus, select:focus { outline: none; border-color: #888; }
+    .btn-row { margin: 14px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+    button {
+      padding: 8px 14px; font-size: 13px; font-weight: 500; cursor: pointer; border-radius: 4px;
+      border: 1px solid #bbb; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+    }
+    button:hover { background: #f8f8f8; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    button.primary { background: #4a7c59; color: #fff; border-color: #3d6a4a; }
+    button.primary:hover { background: #3d6a4a; }
+    #results { margin-top: 16px; }
+    .results-box {
+      padding: 14px 16px; border-radius: 4px; margin-bottom: 10px;
+      background: #e8e8ed; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .results-box.beige { background: #f5f0e6; }
+    .results-box.teal { background: #e8f0ed; }
+    .geo-toggle { margin-bottom: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .geo-toggle button { padding: 6px 12px; font-size: 12px; }
+    .geo-toggle button.active { background: #4a7c59; color: #fff; border-color: #3d6a4a; }
+    .result-row { margin: 8px 0; font-size: 14px; }
+    .result-row strong { display: inline-block; min-width: 180px; }
+    .result-row .val { font-weight: 600; color: #1a5f2a; }
+    .loading { color: #666; font-size: 13px; }
+    .error { color: #c00; font-size: 13px; }
+    .health-table { width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 12px; }
+    .health-table th, .health-table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #ddd; }
+    .health-table th { font-weight: 600; background: rgba(0,0,0,0.04); }
+    .health-table .num { text-align: right; }
+    .toggle-details { margin-top: 8px; font-size: 12px; color: #555; cursor: pointer; }
+    .toggle-details:hover { color: #333; }
+  </style>
+</head>
+<body>
+  <div id="calc-mode">
+  <p class="intro">Below are the health impacts from the pollutant totals shown above. Sync pulls per-fuel data from worksheets (Grid, NG, LPG, Fuel Oil, Biomass) or summed totals. Per-fuel mode runs separate COBRA scenarios for each fuel and sums results.</p>
+
+  <div class="input-group">
+    <label>Region (eGRID, state abbrev, or FIPS)</label>
+    <input id="region" value="36061" placeholder="e.g. USA, NY, 36061, ERCT" />
+  </div>
+  <div class="input-group">
+    <label>Sector (used when per-fuel data not available)</label>
+    <select id="sector">
+      <option value="commercial_electricity">Commercial/Institutional - Electricity</option>
+      <option value="commercial_natural_gas">Commercial/Institutional - Natural Gas</option>
+      <option value="residential_electricity">Residential - Electricity</option>
+      <option value="residential_natural_gas">Residential - Natural Gas</option>
+    </select>
+  </div>
+  <div class="input-group">
+    <label>PM2.5 (Tons) — sum or per-fuel</label>
+    <input id="pm25" type="number" value="1.5" step="0.01" />
+  </div>
+  <div class="input-group">
+    <label>SO2 (Tons)</label>
+    <input id="so2" type="number" value="1" step="0.01" />
+  </div>
+  <div class="input-group">
+    <label>NOx (Tons)</label>
+    <input id="nox" type="number" value="0.2" step="0.01" />
+  </div>
+  <div class="input-group">
+    <label>VOC (Tons)</label>
+    <input id="voc" type="number" value="0.11" step="0.01" />
+  </div>
+
+  <div class="btn-row">
+    <button id="sync">Sync from Dashboard</button>
+    <button id="fetch" class="primary">Calculate Health Impacts</button>
+  </div>
+  </div>
+
+  <div id="detail-mode" style="display:none">
+    <p class="intro">Full health endpoint breakdown from the most recent run on any dashboard.</p>
+    <div class="btn-row">
+      <button id="refresh">Refresh</button>
+    </div>
+  </div>
+
+  <div id="results"></div>
+
+  <script>
+    (function() {
+      const API_BASE = window.location.origin;
+      const FUEL_PATTERNS = [
+        ["grid", ["grid", "electric", "electricity"]],
+        ["natural_gas", ["ng", "natural gas", "naturalgas"]],
+        ["propane", ["lpg", "propane"]],
+        ["fuel_oil", ["fuel oil", "distillate", "dfo"]],
+        ["biomass", ["biomass", "wood"]]
+      ];
+
+      function worksheetToFuel(name) {
+        var n = (name || "").toLowerCase();
+        for (var i = 0; i < FUEL_PATTERNS.length; i++) {
+          var fuel = FUEL_PATTERNS[i][0], patterns = FUEL_PATTERNS[i][1];
+          for (var j = 0; j < patterns.length; j++) {
+            if (n.indexOf(patterns[j]) >= 0) return fuel;
+          }
+        }
+        return null;
+      }
+
+      const PARAM_NAMES = {
+        region: ["Region", "COBRA_Region", "State_Region", "State"],
+        sector: ["Sector", "COBRA_Sector"],
+        pm25: ["PM25", "COBRA_PM25", "PM2.5"],
+        so2: ["SO2", "COBRA_SO2"],
+        nox: ["NOx", "COBRA_NOx"],
+        voc: ["VOC", "COBRA_VOC"],
+        view: ["COBRA_View", "COBRA_Mode"]
+      };
+
+      var emissionsByFuel = null;
+
+      function getParamValue(param) {
+        var v = param.currentValue;
+        if (!v) return null;
+        return (v.nativeValue !== undefined ? v.nativeValue : v.value) ?? null;
+      }
+
+      function findParamValue(params, names) {
+        for (var i = 0; i < names.length; i++) {
+          var p = params.find(function(x) { return x.name === names[i]; });
+          if (p) {
+            var v = getParamValue(p);
+            if (v != null && v !== "") return v;
+          }
+        }
+        return null;
+      }
+
+      var isDetailMode = false;
+
+      async function loadDetailView() {
+        var resultsDiv = document.getElementById("results");
+        resultsDiv.innerHTML = '<div class="results-box"><p class="loading">Loading...</p></div>';
+        try {
+          var res = await fetch(API_BASE + "/latest-results");
+          if (!res.ok) {
+            resultsDiv.innerHTML = '<div class="results-box"><p class="loading">No results yet. Run a calculation on any input dashboard first.</p></div>';
+            return;
+          }
+          var data = await res.json();
+          renderDetailResults(data, resultsDiv);
+        } catch (e) {
+          resultsDiv.innerHTML = '<div class="results-box"><p class="error">Could not load results: ' + e.message + "</p></div>";
+        }
+      }
+
+      function renderDetailResults(data, resultsDiv) {
+        var geo = "national";
+        if (data.county) geo = "county";
+        else if (data.state) geo = "state";
+        var he = data.HealthEndpoints || {};
+        var heBySector = data.HealthEndpoints_by_sector || {};
+        var html = '<div class="results-box"><div class="geo-toggle">' +
+          '<button data-geo="national">National</button>' +
+          '<button data-geo="state">State</button>' +
+          '<button data-geo="county">County</button>' +
+          "</div><div id=\"geo-results\"></div></div>";
+        resultsDiv.innerHTML = html;
+        var geoResults = document.getElementById("geo-results");
+        function showGeo(g) {
+          var d = data[g];
+          document.querySelectorAll(".geo-toggle button").forEach(function(b) {
+            b.classList.toggle("active", b.dataset.geo === g);
+          });
+          if (!d) {
+            geoResults.innerHTML = "<p class=\"loading\">N/A for this geography</p>";
+            return;
+          }
+          var low = d.TotalHealthBenefitsValue_low ?? d.Summary?.TotalHealthBenefitsValue_low;
+          var high = d.TotalHealthBenefitsValue_high ?? d.Summary?.TotalHealthBenefitsValue_high;
+          var out = '<div class="result-row"><strong>Total Health Effects (Low):</strong> <span class="val">' + formatCurrency(low) + "</span></div>" +
+            '<div class="result-row"><strong>Total Health Effects (High):</strong> <span class="val">' + formatCurrency(high) + "</span></div>";
+          if (Object.keys(heBySector).length > 0) {
+            for (var sk in heBySector) {
+              var heRows = (heBySector[sk] || {})[g] || [];
+              if (heRows.length > 0) {
+                out += '<h4 style="margin:16px 0 8px;font-size:14px;">' + sectorLabel(sk) + "</h4>" + renderHealthTable(heRows);
+              }
+            }
+          } else {
+            var heRows = he[g] || [];
+            if (heRows.length > 0) out += renderHealthTable(heRows);
+          }
+          geoResults.innerHTML = out;
+        }
+        document.querySelectorAll(".geo-toggle button").forEach(function(b) {
+          b.addEventListener("click", function() { showGeo(this.dataset.geo); });
+        });
+        showGeo(geo);
+      }
+
+      function setInputsFromParams(params) {
+        var view = findParamValue(params, PARAM_NAMES.view);
+        if (view && String(view).toLowerCase() === "detail") {
+          isDetailMode = true;
+          document.getElementById("calc-mode").style.display = "none";
+          document.getElementById("detail-mode").style.display = "block";
+          loadDetailView();
+          return;
+        }
+        var r = findParamValue(params, PARAM_NAMES.region);
+        if (r != null) document.getElementById("region").value = String(r);
+
+        var s = findParamValue(params, PARAM_NAMES.sector);
+        if (s != null) {
+          var sel = document.getElementById("sector");
+          var v = String(s).toLowerCase();
+          var mapped = v.indexOf("commercial") >= 0 && v.indexOf("electric") >= 0 ? "commercial_electricity" :
+            v.indexOf("commercial") >= 0 ? "commercial_natural_gas" :
+            v.indexOf("residential") >= 0 && v.indexOf("electric") >= 0 ? "residential_electricity" :
+            v.indexOf("residential") >= 0 ? "residential_natural_gas" : null;
+          if (mapped) {
+            for (var i = 0; i < sel.options.length; i++) {
+              if (sel.options[i].value === mapped) { sel.selectedIndex = i; break; }
+            }
+          }
+        }
+
+        var pm25 = findParamValue(params, PARAM_NAMES.pm25);
+        if (pm25 != null) document.getElementById("pm25").value = parseFloat(pm25) || 0;
+        var so2 = findParamValue(params, PARAM_NAMES.so2);
+        if (so2 != null) document.getElementById("so2").value = parseFloat(so2) || 0;
+        var nox = findParamValue(params, PARAM_NAMES.nox);
+        if (nox != null) document.getElementById("nox").value = parseFloat(nox) || 0;
+        var voc = findParamValue(params, PARAM_NAMES.voc);
+        if (voc != null) document.getElementById("voc").value = parseFloat(voc) || 0;
+      }
+
+      async function syncFromWorksheets() {
+        emissionsByFuel = null;
+        var dashboard = tableau.extensions.dashboardContent.dashboard;
+        var worksheets = dashboard.worksheets || [];
+        var byFuel = {};
+        var summed = { PM25: 0, SO2: 0, NOx: 0, VOC: 0 };
+
+        for (var i = 0; i < worksheets.length; i++) {
+          try {
+            var ws = worksheets[i];
+            var name = ws.name || "";
+            var fuel = worksheetToFuel(name);
+            var data = await ws.getSummaryDataAsync();
+            if (!data || !data.columns || !data.data) continue;
+
+            var cols = data.columns;
+            var pm25Idx = cols.findIndex(function(c) { var n = (c.fieldName || "").toUpperCase(); return n.indexOf("PM2") >= 0 || n.indexOf("PM25") >= 0; });
+            var so2Idx = cols.findIndex(function(c) { return (c.fieldName || "").toUpperCase().indexOf("SO2") >= 0; });
+            var noxIdx = cols.findIndex(function(c) { return (c.fieldName || "").toUpperCase().indexOf("NOX") >= 0; });
+            var vocIdx = cols.findIndex(function(c) { return (c.fieldName || "").toUpperCase().indexOf("VOC") >= 0; });
+
+            function getVal(cell) {
+              if (!cell) return null;
+              var v = cell.nativeValue !== undefined ? cell.nativeValue : cell.value;
+              return v != null && String(v).indexOf("%") < 0 ? v : null;
+            }
+
+            var pm25 = 0, so2 = 0, nox = 0, voc = 0;
+            for (var r = 0; r < data.data.length; r++) {
+              var row = data.data[r];
+              if (pm25Idx >= 0) pm25 += parseFloat(getVal(row[pm25Idx])) || 0;
+              if (so2Idx >= 0) so2 += parseFloat(getVal(row[so2Idx])) || 0;
+              if (noxIdx >= 0) nox += parseFloat(getVal(row[noxIdx])) || 0;
+              if (vocIdx >= 0) voc += parseFloat(getVal(row[vocIdx])) || 0;
+            }
+
+            summed.PM25 += pm25; summed.SO2 += so2; summed.NOx += nox; summed.VOC += voc;
+
+            if (fuel && (pm25 > 0 || so2 > 0 || nox > 0 || voc > 0)) {
+              if (!byFuel[fuel]) byFuel[fuel] = { PM25: 0, SO2: 0, NOx: 0, VOC: 0 };
+              byFuel[fuel].PM25 += pm25;
+              byFuel[fuel].SO2 += so2;
+              byFuel[fuel].NOx += nox;
+              byFuel[fuel].VOC += voc;
+            }
+          } catch (e) {}
+        }
+
+        if (Object.keys(byFuel).length > 0) emissionsByFuel = byFuel;
+
+        if (summed.PM25 > 0 || summed.SO2 > 0 || summed.NOx > 0 || summed.VOC > 0) {
+          document.getElementById("pm25").value = summed.PM25.toFixed(2);
+          document.getElementById("so2").value = summed.SO2.toFixed(2);
+          document.getElementById("nox").value = summed.NOx.toFixed(2);
+          document.getElementById("voc").value = summed.VOC.toFixed(2);
+        }
+      }
+
+      async function syncFromDashboard() {
+        if (typeof tableau === "undefined" || !tableau.extensions || !tableau.extensions.dashboardContent) return;
+        try {
+          var dashboard = tableau.extensions.dashboardContent.dashboard;
+          var params = await dashboard.getParametersAsync();
+          if (params && params.length > 0) setInputsFromParams(params);
+          await syncFromWorksheets();
+          document.getElementById("results").innerHTML = '<div class="results-box teal"><p class="loading">Synced from dashboard.' + (emissionsByFuel ? " Per-fuel mode: " + Object.keys(emissionsByFuel).join(", ") : "") + "</p></div>";
+          setTimeout(function() { document.getElementById("results").innerHTML = ""; }, 2000);
+        } catch (e) {
+          document.getElementById("results").innerHTML = '<div class="results-box"><p class="error">Sync failed: ' + e.message + "</p></div>";
+        }
+      }
+
+      function getInputs() {
+        var region = document.getElementById("region").value.trim();
+        var sector = document.getElementById("sector").value;
+        var pm25 = parseFloat(document.getElementById("pm25").value) || 0;
+        var so2 = parseFloat(document.getElementById("so2").value) || 0;
+        var nox = parseFloat(document.getElementById("nox").value) || 0;
+        var voc = parseFloat(document.getElementById("voc").value) || 0;
+        var emissions = { PM25: pm25, SO2: so2, NOx: nox, VOC: voc };
+
+        if (emissionsByFuel && Object.keys(emissionsByFuel).length > 0) {
+          return { region: region, emissions_by_fuel: emissionsByFuel };
+        }
+        return { region: region, sector: sector, emissions: emissions };
+      }
+
+      function formatCurrency(n) {
+        if (n == null || isNaN(n)) return "—";
+        return "$" + Math.round(n).toLocaleString();
+      }
+
+      function sectorLabel(key) {
+        var labels = { grid: "Grid", natural_gas: "Natural Gas", propane: "Propane", fuel_oil: "Fuel Oil", biomass: "Biomass" };
+        return labels[key] || String(key).replace(/_/g, " ").replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      }
+
+      function renderHealthTable(rows) {
+        if (!rows || rows.length === 0) return "";
+        var html = '<table class="health-table"><thead><tr><th>Health Endpoint</th><th>Pollutant</th><th class="num">Incidence Low</th><th class="num">Incidence High</th><th class="num">Monetary Low</th><th class="num">Monetary High</th></tr></thead><tbody>';
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          var incLo = r.IncidenceLow != null ? r.IncidenceLow.toFixed(4) : "—";
+          var incHi = r.IncidenceHigh != null ? r.IncidenceHigh.toFixed(4) : "—";
+          var monLo = r.MonetaryLow != null ? formatCurrency(r.MonetaryLow) : "—";
+          var monHi = r.MonetaryHigh != null ? formatCurrency(r.MonetaryHigh) : "—";
+          html += "<tr><td>" + (r.HealthEndpoint || "") + "</td><td>" + (r.Pollutant || "") + "</td><td class=\"num\">" + incLo + "</td><td class=\"num\">" + incHi + "</td><td class=\"num\">" + monLo + "</td><td class=\"num\">" + monHi + "</td></tr>";
+        }
+        html += "</tbody></table>";
+        return html;
+      }
+
+      function attachHandler() {
+        document.getElementById("sync").addEventListener("click", function() { syncFromDashboard(); });
+        document.getElementById("refresh").addEventListener("click", function() { loadDetailView(); });
+
+        document.getElementById("fetch").addEventListener("click", async function() {
+          var btn = this;
+          var resultsDiv = document.getElementById("results");
+          btn.disabled = true;
+          resultsDiv.innerHTML = '<div class="results-box"><p class="loading">Calculating health impacts... This may take 1–2 minutes for per-fuel mode.</p></div>';
+
+          var inputs = getInputs();
+          var url = API_BASE + "/health-effects?include_health_endpoints=true";
+          try {
+            var res = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(inputs)
+            });
+            if (!res.ok) {
+              var err = await res.json().catch(function() { return {}; });
+              throw new Error(err.detail || res.statusText || "Request failed");
+            }
+            var data = await res.json();
+
+            try { await fetch(API_BASE + "/store-results", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }); } catch (e) {}
+
+            var geo = "national";
+            if (data.county) geo = "county";
+            else if (data.state) geo = "state";
+
+            var html = '<div class="results-box"><div class="geo-toggle">' +
+              '<button data-geo="national">National</button>' +
+              '<button data-geo="state">State</button>' +
+              '<button data-geo="county">County</button>' +
+              "</div><div id=\"geo-results\"></div></div>";
+            resultsDiv.innerHTML = html;
+
+            var geoResults = document.getElementById("geo-results");
+            var he = data.HealthEndpoints || {};
+
+            function showGeo(g) {
+              var d = data[g];
+              document.querySelectorAll(".geo-toggle button").forEach(function(b) {
+                b.classList.toggle("active", b.dataset.geo === g);
+              });
+              if (!d) {
+                geoResults.innerHTML = "<p class=\"loading\">N/A for this geography</p>";
+                return;
+              }
+              var low = d.TotalHealthBenefitsValue_low ?? d.Summary?.TotalHealthBenefitsValue_low;
+              var high = d.TotalHealthBenefitsValue_high ?? d.Summary?.TotalHealthBenefitsValue_high;
+              var bySector = d.by_sector || {};
+              var sectorHtml = "";
+              if (Object.keys(bySector).length > 0) {
+                for (var sk in bySector) {
+                  var sv = bySector[sk];
+                  var sl = sv.TotalHealthBenefitsValue_low;
+                  var sh = sv.TotalHealthBenefitsValue_high;
+                  sectorHtml += '<div class="result-row"><strong>' + sectorLabel(sk) + ":</strong> <span class=\"val\">" + formatCurrency(sl) + " (Low) / " + formatCurrency(sh) + " (High)</span></div>";
+                }
+              }
+              var heRows = he[g] || [];
+              var tableHtml = heRows.length > 0 ? '<div class="toggle-details" id="toggle-details">▼ Show health endpoint details</div><div id="health-details" style="display:none">' + renderHealthTable(heRows) + "</div>" : "";
+              geoResults.innerHTML = sectorHtml +
+                '<div class="result-row"><strong>Total Health Effects (Low):</strong> <span class="val">' + formatCurrency(low) + "</span></div>" +
+                '<div class="result-row"><strong>Total Health Effects (High):</strong> <span class="val">' + formatCurrency(high) + "</span></div>" + tableHtml;
+
+              var toggle = document.getElementById("toggle-details");
+              var details = document.getElementById("health-details");
+              if (toggle && details) {
+                toggle.addEventListener("click", function() {
+                  var show = details.style.display === "none";
+                  details.style.display = show ? "block" : "none";
+                  toggle.textContent = show ? "▲ Hide health endpoint details" : "▼ Show health endpoint details";
+                });
+              }
+            }
+
+            document.querySelectorAll(".geo-toggle button").forEach(function(b) {
+              b.addEventListener("click", function() { showGeo(this.dataset.geo); });
+            });
+
+            showGeo(geo);
+          } catch (e) {
+            resultsDiv.innerHTML = '<div class="results-box"><p class="error">Error: ' + e.message + "</p></div>";
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      }
+
+      if (typeof tableau !== "undefined" && tableau.extensions) {
+        tableau.extensions.initializeAsync().then(function() {
+          attachHandler();
+          syncFromDashboard();
+          var dashboard = tableau.extensions.dashboardContent.dashboard;
+          dashboard.getParametersAsync().then(function(params) {
+            if (params && params.length > 0) {
+              params.forEach(function(p) {
+                p.addEventListener(tableau.TableauEventType.ParameterChanged, function() { syncFromDashboard(); });
+              });
+            }
+          }).catch(function() {});
+        });
+      } else {
+        attachHandler();
+        document.getElementById("sync").style.display = "none";
+        document.getElementById("results").innerHTML = '<div class="results-box teal"><p class="loading">Load in Tableau for full integration, or use the button to test.</p></div>';
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>COBRA - Custom Module</title>
+  <script src="https://extensions.tableauusercontent.com/resources/tableau.extensions.1.latest.min.js"></script>
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+  <div id="calc-view">
+    <p class="intro">Health impacts from 5 fuel sources: Grid, Natural Gas, Propane, Fuel Oil, and Biomass. Reads pollutant data from corresponding worksheets.</p>
+    <div class="btn-row">
+      <button id="calculate" class="primary">Calculate Health Impacts</button>
+    </div>
+    <div id="init-status" style="font-size:11px;color:#888;margin-top:4px;"></div>
+  </div>
+
+  <div id="results-view" style="display:none">
+    <div id="results"></div>
+    <div class="btn-row">
+      <button id="reset">Run Another Calculation</button>
+    </div>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    (function () {
+      var WORKSHEET_FUEL_MAP = [
+        { patterns: ["grid usage", "grid", "electric"], fuel: "grid" },
+        { patterns: ["natural gas usage", "natural gas", "ng"], fuel: "natural_gas" },
+        { patterns: ["propane usage", "propane", "lpg"], fuel: "propane" },
+        { patterns: ["distillate fuel oil usage", "fuel oil", "distillate", "dfo"], fuel: "fuel_oil" },
+        { patterns: ["biomass usage", "biomass", "wood"], fuel: "biomass" }
+      ];
+
+      var STATE_PARAMS = ["State/Grid Region", "State", "Select State", "State_Abbr", "State_Region", "Grid Region", "COBRA_State"];
+
+      var dashboard = null;
+
+      function matchFuel(wsName) {
+        var n = (wsName || "").toLowerCase();
+        for (var i = 0; i < WORKSHEET_FUEL_MAP.length; i++) {
+          var entry = WORKSHEET_FUEL_MAP[i];
+          for (var j = 0; j < entry.patterns.length; j++) {
+            if (n.indexOf(entry.patterns[j]) >= 0) return entry.fuel;
+          }
+        }
+        return null;
+      }
+
+      var calcBtn = document.getElementById("calculate");
+      calcBtn.disabled = true;
+      calcBtn.textContent = "Initializing...";
+
+      COBRA.initExtension(function (db) {
+        dashboard = db;
+        calcBtn.disabled = false;
+        calcBtn.textContent = "Calculate Health Impacts";
+        if (!dashboard) {
+          document.getElementById("results").innerHTML =
+            '<div class="status-msg info">Not in Tableau — will use test data.</div>';
+          document.getElementById("results-view").style.display = "block";
+        }
+      });
+
+      calcBtn.addEventListener("click", async function () {
+        var btn = this;
+        var resultsDiv = document.getElementById("results");
+        btn.disabled = true;
+        resultsDiv.innerHTML = '<div class="results-box"><p class="loading">Reading dashboard data and calculating health impacts... This may take 1\u20132 minutes for multiple fuels.</p></div>';
+        document.getElementById("results-view").style.display = "block";
+
+        try {
+          var payload = {};
+          var debugLines = [];
+
+          if (dashboard) {
+            var params = await dashboard.getParametersAsync();
+            debugLines.push("Parameters found: " + params.map(function(p) {
+              var v = p.currentValue;
+              var val = v ? (v.nativeValue !== undefined ? v.nativeValue : v.value) : "(empty)";
+              return p.name + " = " + val;
+            }).join(", "));
+
+            var region = COBRA.findParamValue(params, STATE_PARAMS);
+            debugLines.push("Region/State: " + (region || "(none)"));
+            debugLines.push("(Custom Module uses State/Grid Region only; county parameters are ignored)");
+
+            if (region) {
+              payload.state = String(region);
+            } else {
+              payload.region = "national";
+            }
+            debugLines.push("Location sent to API: " + (payload.state ? "state=" + payload.state : "region=" + payload.region));
+
+            var emissionsByFuel = {};
+            var worksheets = dashboard.worksheets || [];
+            debugLines.push("Worksheets: " + worksheets.map(function(w) { return '"' + w.name + '"'; }).join(", "));
+
+            for (var i = 0; i < worksheets.length; i++) {
+              var ws = worksheets[i];
+              var fuel = matchFuel(ws.name);
+              if (!fuel) {
+                debugLines.push('"' + ws.name + '" — no fuel match, skipping');
+                continue;
+              }
+              var pollutants = await COBRA.readWorksheetPollutants(ws);
+              if (pollutants && (pollutants.PM25 || pollutants.SO2 || pollutants.NOx || pollutants.VOC)) {
+                emissionsByFuel[fuel] = pollutants;
+                debugLines.push(fuel + ' (from "' + ws.name + '"): PM25=' + pollutants.PM25 + ' SO2=' + pollutants.SO2 + ' NOx=' + pollutants.NOx + ' VOC=' + pollutants.VOC);
+              } else {
+                debugLines.push('"' + ws.name + '" matched ' + fuel + ' but no pollutant data found');
+              }
+            }
+            payload.emissions_by_fuel = emissionsByFuel;
+          } else {
+            payload = {
+              state: "AR",
+              emissions_by_fuel: {
+                grid: { PM25: 1, SO2: 0.5, NOx: 0.3, VOC: 0.1 },
+                natural_gas: { PM25: 0.3, SO2: 0.1, NOx: 0.2, VOC: 0.05 },
+                propane: { PM25: 0.1, SO2: 0, NOx: 0.05, VOC: 0.02 }
+              }
+            };
+            debugLines.push("Test mode (not in Tableau)");
+          }
+
+          resultsDiv.innerHTML = '<div class="results-box"><p class="loading">Sending to API...</p>' +
+            '<pre style="font-size:11px;color:#555;white-space:pre-wrap;margin-top:8px;">' +
+            debugLines.join("\n") + "\n\nPayload: " + JSON.stringify(payload, null, 2) + '</pre></div>';
+
+          if (!payload.emissions_by_fuel || Object.keys(payload.emissions_by_fuel).length === 0) {
+            throw new Error("No pollutant data found. Ensure worksheets for Grid, Natural Gas, Propane, Fuel Oil, or Biomass exist.\n\n" + debugLines.join("\n"));
+          }
+
+          var data = await COBRA.callHealthEffects(payload, true, "custom_module");
+          await COBRA.storeResults(data, "custom_module");
+
+          // Show per-fuel results
+          var geo = data.county ? "county" : (data.state ? "state" : "national");
+          var d = data[geo] || {};
+          var bySector = d.by_sector || {};
+          var html = '';
+          for (var fk in bySector) {
+            var sv = bySector[fk];
+            var label = COBRA.sectorLabel(fk);
+            html += '<div class="result-row"><strong>' + label + ' (Low):</strong> <span class="val">' + COBRA.formatCurrency(sv.TotalHealthBenefitsValue_low) + '</span></div>';
+            html += '<div class="result-row"><strong>' + label + ' (High):</strong> <span class="val">' + COBRA.formatCurrency(sv.TotalHealthBenefitsValue_high) + '</span></div>';
+          }
+          html += '<details style="margin-top:12px;font-size:11px;color:#888;"><summary>Debug info</summary><pre style="white-space:pre-wrap;">' +
+            debugLines.join("\n") + "\n\nPayload sent: " + JSON.stringify(payload, null, 2) + '</pre></details>';
+          resultsDiv.innerHTML = '<div class="results-box teal">' + html + '</div>';
+          document.getElementById("calc-view").style.display = "none";
+
+        } catch (e) {
+          resultsDiv.innerHTML = '<div class="results-box"><p class="error">Error: ' + e.message + '</p></div>';
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      document.getElementById("reset").addEventListener("click", function () {
+        document.getElementById("calc-view").style.display = "block";
+        document.getElementById("results-view").style.display = "none";
+        document.getElementById("results").innerHTML = "";
+      });
+    })();
+  </script>
+</body>
+</html>

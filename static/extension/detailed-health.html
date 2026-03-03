@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>COBRA - Detailed Health Impacts</title>
+  <script src="https://extensions.tableauusercontent.com/resources/tableau.extensions.1.latest.min.js"></script>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .detail-header h3 { margin: 0; font-size: 15px; }
+    .source-tabs { margin-bottom: 12px; display: flex; gap: 0; border-bottom: 2px solid #ddd; }
+    .source-tabs button {
+      padding: 8px 16px; font-size: 13px; font-weight: 500; cursor: pointer;
+      border: 1px solid #ddd; border-bottom: none; border-radius: 4px 4px 0 0;
+      background: #f0f0f0; color: #666; margin-bottom: -2px;
+    }
+    .source-tabs button.active { background: #fff; color: #333; border-bottom: 2px solid #fff; font-weight: 600; }
+    .source-tabs button:hover:not(.active) { background: #e8e8e8; }
+    .sector-tabs { margin: 12px 0; display: flex; gap: 6px; flex-wrap: wrap; }
+    .sector-tabs button { padding: 5px 10px; font-size: 11px; }
+    .sector-tabs button.active { background: #4a7c59; color: #fff; border-color: #3d6a4a; }
+    .tab-actions { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .tab-actions button { padding: 5px 10px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="detail-header">
+    <h3>Detailed Health Impacts</h3>
+  </div>
+
+  <div class="source-tabs" id="source-tabs">
+    <button data-source="code_comparison" class="active">Code Comparison</button>
+    <button data-source="custom_module">Custom Module</button>
+    <button data-source="policy_module">Policy Module</button>
+  </div>
+
+  <div class="tab-actions">
+    <button id="refresh">Refresh</button>
+    <button id="export-csv">Export CSV</button>
+    <span id="status-text" style="font-size:11px;color:#888;"></span>
+  </div>
+
+  <div id="geo-toggle-area"></div>
+  <div id="sector-tabs-area"></div>
+  <div id="results">
+    <div class="results-box"><p class="loading">Loading latest results...</p></div>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    (function () {
+      var SOURCES = {
+        code_comparison: { label: "Code Comparison", data: null },
+        custom_module: { label: "Custom Module", data: null },
+        policy_module: { label: "Policy Module", data: null }
+      };
+
+      var currentSource = "code_comparison";
+      var currentGeo = "national";
+      var currentSector = null;
+
+      async function loadSource(source) {
+        try {
+          var res = await fetch(COBRA.API_BASE + "/latest-results?source=" + encodeURIComponent(source) + "&session_id=" + encodeURIComponent(COBRA.getSessionId()));
+          if (!res.ok) {
+            SOURCES[source].data = null;
+            return;
+          }
+          SOURCES[source].data = await res.json();
+        } catch (e) {
+          SOURCES[source].data = null;
+        }
+      }
+
+      async function loadAllSources() {
+        document.getElementById("status-text").textContent = "Loading...";
+        await Promise.all(Object.keys(SOURCES).map(function (s) { return loadSource(s); }));
+        document.getElementById("status-text").textContent = "";
+        updateSourceTabs();
+        showSource(currentSource);
+      }
+
+      async function refreshCurrent() {
+        document.getElementById("status-text").textContent = "Refreshing...";
+        await loadSource(currentSource);
+        document.getElementById("status-text").textContent = "";
+        updateSourceTabs();
+        showSource(currentSource);
+      }
+
+      function updateSourceTabs() {
+        document.querySelectorAll("#source-tabs button").forEach(function (b) {
+          var src = b.dataset.source;
+          var hasData = SOURCES[src] && SOURCES[src].data;
+          b.style.opacity = hasData ? "1" : "0.5";
+          b.classList.toggle("active", src === currentSource);
+        });
+      }
+
+      function showSource(source) {
+        currentSource = source;
+        currentSector = null;
+        var data = SOURCES[source].data;
+        updateSourceTabs();
+
+        if (!data) {
+          document.getElementById("geo-toggle-area").innerHTML = "";
+          document.getElementById("sector-tabs-area").innerHTML = "";
+          document.getElementById("results").innerHTML =
+            '<div class="results-box"><p class="loading">No results for ' + SOURCES[source].label + '. Run a calculation on that dashboard first.</p></div>';
+          return;
+        }
+
+        // Default geo to most specific
+        if (data.county) currentGeo = "county";
+        else if (data.state) currentGeo = "state";
+        else currentGeo = "national";
+
+        setupGeoToggle(data);
+        setupSectorTabs(data);
+        render(data);
+      }
+
+      function setupGeoToggle(data) {
+        var area = document.getElementById("geo-toggle-area");
+        var geos = ["national", "state"];
+        if (data && data.county) geos.push("county");
+
+        var html = '<div class="geo-toggle">';
+        for (var i = 0; i < geos.length; i++) {
+          var label = geos[i].charAt(0).toUpperCase() + geos[i].slice(1);
+          html += '<button data-geo="' + geos[i] + '"' + (geos[i] === currentGeo ? ' class="active"' : '') + '>' + label + '</button>';
+        }
+        html += '</div>';
+        area.innerHTML = html;
+
+        area.querySelectorAll("button").forEach(function (b) {
+          b.addEventListener("click", function () {
+            currentGeo = this.dataset.geo;
+            area.querySelectorAll("button").forEach(function (x) { x.classList.remove("active"); });
+            this.classList.add("active");
+            render(SOURCES[currentSource].data);
+          });
+        });
+      }
+
+      function setupSectorTabs(data) {
+        var area = document.getElementById("sector-tabs-area");
+        var heBySector = (data || {}).HealthEndpoints_by_sector || {};
+        var sectors = Object.keys(heBySector);
+        if (sectors.length === 0) {
+          area.innerHTML = "";
+          currentSector = null;
+          return;
+        }
+
+        currentSector = null;
+        var html = '<div class="sector-tabs"><button data-sector="" class="active">All Combined</button>';
+        for (var i = 0; i < sectors.length; i++) {
+          html += '<button data-sector="' + sectors[i] + '">' + COBRA.sectorLabel(sectors[i]) + '</button>';
+        }
+        html += '</div>';
+        area.innerHTML = html;
+
+        area.querySelectorAll("button").forEach(function (b) {
+          b.addEventListener("click", function () {
+            currentSector = this.dataset.sector || null;
+            area.querySelectorAll("button").forEach(function (x) { x.classList.remove("active"); });
+            this.classList.add("active");
+            render(SOURCES[currentSource].data);
+          });
+        });
+      }
+
+      function render(data) {
+        var resultsDiv = document.getElementById("results");
+        if (!data) {
+          resultsDiv.innerHTML = '<div class="results-box"><p class="loading">No data loaded.</p></div>';
+          return;
+        }
+
+        var d = data[currentGeo];
+        if (!d) {
+          resultsDiv.innerHTML = '<div class="results-box"><p class="loading">N/A for this geography.</p></div>';
+          return;
+        }
+
+        var html = '';
+        var heRows = [];
+        if (currentSector) {
+          // Show per-sector summary
+          var bySector = d.by_sector || {};
+          var sv = bySector[currentSector] || {};
+          html += '<div class="results-box teal">';
+          html += '<div class="result-row"><strong>' + COBRA.sectorLabel(currentSector) + ' (Low):</strong> <span class="val">' + COBRA.formatCurrency(sv.TotalHealthBenefitsValue_low) + '</span></div>';
+          html += '<div class="result-row"><strong>' + COBRA.sectorLabel(currentSector) + ' (High):</strong> <span class="val">' + COBRA.formatCurrency(sv.TotalHealthBenefitsValue_high) + '</span></div>';
+          html += '</div>';
+          var heBySector = data.HealthEndpoints_by_sector || {};
+          var sectorData = heBySector[currentSector] || {};
+          heRows = sectorData[currentGeo] || [];
+        } else {
+          html += '<div class="results-box teal">' + COBRA.renderSummary(data, currentGeo) + '</div>';
+          var he = data.HealthEndpoints || {};
+          heRows = he[currentGeo] || [];
+        }
+
+        if (heRows.length > 0) {
+          html += COBRA.renderHealthTable(heRows, { grouped: true });
+        } else {
+          html += '<div class="results-box"><p class="loading">No health endpoint details available' +
+            (currentSector ? ' for ' + COBRA.sectorLabel(currentSector) : '') + '.</p></div>';
+        }
+
+        resultsDiv.innerHTML = html;
+      }
+
+      // Source tab clicks
+      document.querySelectorAll("#source-tabs button").forEach(function (b) {
+        b.addEventListener("click", function () {
+          showSource(this.dataset.source);
+        });
+      });
+
+      // Refresh
+      document.getElementById("refresh").addEventListener("click", function () {
+        refreshCurrent();
+      });
+
+      // Export CSV
+      document.getElementById("export-csv").addEventListener("click", function () {
+        var data = SOURCES[currentSource].data;
+        if (!data) { alert("No data to export. Run a calculation first."); return; }
+
+        var he = data.HealthEndpoints || {};
+        var rows = he[currentGeo] || [];
+        if (currentSector) {
+          var heBySector = data.HealthEndpoints_by_sector || {};
+          rows = (heBySector[currentSector] || {})[currentGeo] || [];
+        }
+        if (rows.length === 0) { alert("No health endpoint data to export."); return; }
+
+        var csv = "Health Endpoint,Pollutant,Incidence Low,Incidence High,Monetary Low,Monetary High\n";
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          csv += '"' + (r.HealthEndpoint || "").replace(/"/g, '""') + '",'
+            + '"' + (r.Pollutant || "") + '",'
+            + (r.IncidenceLow != null ? r.IncidenceLow : "") + ","
+            + (r.IncidenceHigh != null ? r.IncidenceHigh : "") + ","
+            + (r.MonetaryLow != null ? r.MonetaryLow : "") + ","
+            + (r.MonetaryHigh != null ? r.MonetaryHigh : "") + "\n";
+        }
+
+        var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "health_impacts_" + currentSource + "_" + currentGeo + ".csv";
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      // Auto-load all on init
+      COBRA.initExtension(function () {
+        loadAllSources();
+      });
+    })();
+  </script>
+</body>
+</html>

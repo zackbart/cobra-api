@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>COBRA - Code Comparison</title>
+  <script src="https://extensions.tableauusercontent.com/resources/tableau.extensions.1.latest.min.js"></script>
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+  <div id="calc-view">
+    <p class="intro">Health impacts from electricity and fuel pollutant changes. Reads from "Electricity Pollutants Impact" and "Fuel Pollutants Impact" worksheets.</p>
+    <div class="btn-row">
+      <button id="calculate" class="primary">Calculate Health Impacts</button>
+    </div>
+    <div id="init-status" style="font-size:11px;color:#888;margin-top:4px;"></div>
+  </div>
+
+  <div id="results-view" style="display:none">
+    <div id="results"></div>
+    <div class="btn-row">
+      <button id="reset">Run Another Calculation</button>
+    </div>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    (function () {
+      var ELECTRICITY_WS = "Electricity Pollutants Impact";
+      var FUEL_WS = "Fuel Pollutants Impact";
+      // Exact measure names for electricity worksheet (Code Comparison) — match by containing this string
+      var ELECTRIC_EXACT_MEASURES = {
+        PM25: "SUM(PM2.5 (Tons) - Electric (CodeComp))",
+        SO2: "SUM(SO2 (Tons) - Electric (CodeComp))",
+        NOx: "SUM(NOx (Tons) - Electric (CodeComp))",
+        VOC: "SUM(VOC (Tons) - Electric (CodeComp))"
+      };
+      var STATE_PARAMS = ["State", "Select State", "State_Abbr", "State_Region", "State/Grid Region", "COBRA_State"];
+      var COUNTY_PARAMS = ["County", "County Selection", "County?", "County_Name", "COBRA_County"];
+
+      var dashboard = null;
+      var initDone = false;
+      var calcBtn = document.getElementById("calculate");
+      calcBtn.disabled = true;
+      calcBtn.textContent = "Initializing...";
+
+      COBRA.initExtension(function (db) {
+        dashboard = db;
+        initDone = true;
+        calcBtn.disabled = false;
+        calcBtn.textContent = "Calculate Health Impacts";
+        if (!dashboard) {
+          document.getElementById("results").innerHTML =
+            '<div class="status-msg info">Not in Tableau — will use test data.</div>';
+          document.getElementById("results-view").style.display = "block";
+        }
+      });
+
+      calcBtn.addEventListener("click", async function () {
+        var btn = this;
+        var resultsDiv = document.getElementById("results");
+        btn.disabled = true;
+        document.getElementById("calc-view").querySelector(".intro").textContent = "Calculating...";
+        resultsDiv.innerHTML = '<div class="results-box"><p class="loading">Reading dashboard data and calculating health impacts... This may take 1\u20132 minutes.</p></div>';
+        document.getElementById("results-view").style.display = "block";
+
+        try {
+          var payload = {};
+          var debugLines = [];
+          debugLines.push("initDone=" + initDone + ", dashboard=" + (dashboard ? "yes" : "null"));
+
+          if (dashboard) {
+            // Log all parameters
+            var params = await dashboard.getParametersAsync();
+            debugLines.push("Parameters found: " + params.map(function(p) {
+              var v = p.currentValue;
+              var val = v ? (v.nativeValue !== undefined ? v.nativeValue : v.value) : "(empty)";
+              return p.name + " = " + val;
+            }).join(", "));
+
+            var state = COBRA.findParamValue(params, STATE_PARAMS);
+            var county = COBRA.findParamValue(params, COUNTY_PARAMS);
+            debugLines.push("From params: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
+
+            // Prefer "State Selection" / "County Selection" filters (visible dropdowns) over "Select State" / "County?" params
+            var filterCounty = await COBRA.findFilterValue(dashboard, ["County Selection", "County", "County?"]);
+            var filterState = await COBRA.findFilterValue(dashboard, ["State Selection", "State", "State/Grid Region"]);
+            debugLines.push("From filters: State=" + (filterState || "(none)") + ", County=" + (filterCounty || "(none)"));
+
+            // Prefer filter values if params didn't match well
+            if (filterState) state = filterState;
+            if (filterCounty) county = filterCounty;
+            county = COBRA.normalizeCountyForPayload(county);
+            debugLines.push("Using: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
+
+            if (state) {
+              payload.state = String(state);
+              if (county) payload.county_name = String(county);
+            } else {
+              var region = COBRA.findParamValue(params, ["Region", "COBRA_Region", "State_Region"]);
+              payload.region = region || "national";
+              debugLines.push("No State param found, using region=" + payload.region);
+            }
+
+            // Log all worksheets
+            var worksheets = dashboard.worksheets || [];
+            debugLines.push("Worksheets: " + worksheets.map(function(w) { return '"' + w.name + '"'; }).join(", "));
+
+            // Read worksheets
+            var emissionsByFuel = {};
+            for (var i = 0; i < worksheets.length; i++) {
+              var ws = worksheets[i];
+              var name = ws.name || "";
+              if (name.toLowerCase().indexOf("electric") >= 0 || name.toLowerCase().indexOf("fuel") >= 0) {
+                // Log column names for debugging
+                var wsData = await ws.getSummaryDataAsync();
+                var colNames = wsData && wsData.columns ? wsData.columns.map(function(c) { return c.fieldName || "(unnamed)"; }) : [];
+                debugLines.push("\"" + name + "\" columns: " + JSON.stringify(colNames));
+                if (wsData && wsData.data && wsData.data.length > 0) {
+                  var firstRowVals = wsData.data[0].map(function(cell, idx) {
+                    var v = cell ? (cell.nativeValue !== undefined ? cell.nativeValue : cell.value) : null;
+                    return colNames[idx] + "=" + v;
+                  });
+                  debugLines.push("  first row: " + firstRowVals.join(", "));
+                }
+
+                if (name.toLowerCase().indexOf("electric") >= 0) {
+                  var elecData = await COBRA.readWorksheetPollutants(ws, { exactMeasureNames: ELECTRIC_EXACT_MEASURES });
+                  if (elecData) {
+                    emissionsByFuel.grid = elecData;
+                    debugLines.push("grid (from \"" + name + "\"): PM25=" + elecData.PM25 + " SO2=" + elecData.SO2 + " NOx=" + elecData.NOx + " VOC=" + elecData.VOC);
+                  } else {
+                    debugLines.push("\"" + name + "\" matched electric but no pollutant columns found");
+                  }
+                } else {
+                  var fuelData = await COBRA.readWorksheetPollutants(ws);
+                  if (fuelData) {
+                    emissionsByFuel.natural_gas = fuelData;
+                    debugLines.push("natural_gas (from \"" + name + "\"): PM25=" + fuelData.PM25 + " SO2=" + fuelData.SO2 + " NOx=" + fuelData.NOx + " VOC=" + fuelData.VOC);
+                  } else {
+                    debugLines.push("\"" + name + "\" matched fuel but no pollutant columns found");
+                  }
+                }
+              }
+            }
+            if (Object.keys(emissionsByFuel).length > 0) {
+              payload.emissions_by_fuel = emissionsByFuel;
+            }
+          } else {
+            payload = {
+              state: "AR",
+              county_name: "Benton County",
+              emissions_by_fuel: {
+                grid: { PM25: 1, SO2: 0.5, NOx: 0.3, VOC: 0.1 },
+                natural_gas: { PM25: 0.5, SO2: 0.2, NOx: 0.1, VOC: 0.05 }
+              }
+            };
+            debugLines.push("Test mode (not in Tableau)");
+          }
+
+          // Show what we read before calling API
+          resultsDiv.innerHTML = '<div class="results-box"><p class="loading">Sending to API...</p>' +
+            '<pre style="font-size:11px;color:#555;white-space:pre-wrap;margin-top:8px;">' +
+            debugLines.join("\n") + "\n\nPayload: " + JSON.stringify(payload, null, 2) + '</pre></div>';
+
+          if (!payload.emissions_by_fuel || Object.keys(payload.emissions_by_fuel).length === 0) {
+            throw new Error("No pollutant data found in worksheets. Make sure worksheets with 'electric' or 'fuel' in the name exist.\n\n" + debugLines.join("\n"));
+          }
+
+          var data = await COBRA.callHealthEffects(payload, true, "code_comparison");
+          await COBRA.storeResults(data, "code_comparison");
+
+          // Show per-fuel results
+          var geo = data.county ? "county" : (data.state ? "state" : "national");
+          var d = data[geo] || {};
+          var bySector = d.by_sector || {};
+          var html = '';
+
+          // Per-fuel lines
+          var fuelLabels = { grid: "Electricity", natural_gas: "Fuel" };
+          for (var fk in bySector) {
+            var sv = bySector[fk];
+            var label = fuelLabels[fk] || COBRA.sectorLabel(fk);
+            html += '<div class="result-row"><strong>' + label + ' (Low):</strong> <span class="val">' + COBRA.formatCurrency(sv.TotalHealthBenefitsValue_low) + '</span></div>';
+            html += '<div class="result-row"><strong>' + label + ' (High):</strong> <span class="val">' + COBRA.formatCurrency(sv.TotalHealthBenefitsValue_high) + '</span></div>';
+          }
+
+          html += '<details style="margin-top:12px;font-size:11px;color:#888;"><summary>Debug info</summary><pre style="white-space:pre-wrap;">' +
+            debugLines.join("\n") + "\n\nPayload sent: " + JSON.stringify(payload, null, 2) + '</pre></details>';
+          resultsDiv.innerHTML = '<div class="results-box teal">' + html + '</div>';
+          document.getElementById("calc-view").style.display = "none";
+
+        } catch (e) {
+          resultsDiv.innerHTML = '<div class="results-box"><p class="error">Error: ' + e.message + '</p></div>';
+        } finally {
+          btn.disabled = false;
+          document.getElementById("calc-view").querySelector(".intro").textContent =
+            "Health impacts from electricity and fuel pollutant changes.";
+        }
+      });
+
+      document.getElementById("reset").addEventListener("click", function () {
+        document.getElementById("calc-view").style.display = "block";
+        document.getElementById("results-view").style.display = "none";
+        document.getElementById("results").innerHTML = "";
+      });
+    })();
+  </script>
+</body>
+</html>
