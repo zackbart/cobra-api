@@ -1,6 +1,8 @@
 # COBRA Proxy API
 
-Proxy for the EPA COBRA (CO-Benefits Risk Assessment) API. Powers 4 Tableau dashboard extensions that calculate health impacts from air pollutant changes (PM2.5, SO2, NOx, VOC).
+> Proxy API for the EPA [COBRA (CO-Benefits Risk Assessment)](https://www.epa.gov/cobra) screening tool. Calculates health impacts from changes in air pollutant emissions (PM2.5, SO2, NOx, VOC) and powers 4 Tableau dashboard extensions.
+
+[![Deploy](https://img.shields.io/badge/deploy-Railway-blueviolet)](https://cobra-api.up.railway.app)
 
 **Production:** https://cobra-api.up.railway.app
 **Docs:** [Architecture](docs/arch.md) | [Tableau Extensions](docs/tableau.md) | [Troubleshooting](docs/troubleshooting.md)
@@ -109,6 +111,13 @@ uvicorn main:app --reload
 Open http://localhost:8000 for FastAPI docs.
 
 ---
+
+## Tech Stack
+
+- **Runtime:** Python 3 + [FastAPI](https://fastapi.tiangolo.com/)
+- **HTTP client:** [httpx](https://www.python-httpx.org/) (async calls to EPA COBRA API)
+- **Hosting:** [Railway](https://railway.app/) with Uvicorn
+- **Frontend:** Vanilla JS Tableau Extensions (no build step)
 
 ## Known Issues / Active Work
 
