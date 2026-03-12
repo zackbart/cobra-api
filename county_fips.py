@@ -3250,36 +3250,53 @@ def normalize_county_name(name: str) -> str:
 def resolve_county_fips(state: str, county_name: str) -> str | None:
     """Resolve (state_abbrev, county_name) to 5-digit FIPS.
 
-    Tries exact match first, then strips common suffixes.
+    Matching priority:
+    1. Exact match (case-sensitive)
+    2. Case-insensitive exact match
+    3. Strip common suffixes, then exact match on base name
+    4. Base name matches start of canonical name at a word boundary
     Returns None if not found.
     """
     st = state.strip().upper()
     name = county_name.strip()
-    
-    # Try exact match
+
+    # 1. Exact match (case-sensitive)
     if (st, name) in COUNTY_FIPS:
         return COUNTY_FIPS[(st, name)]
-    
-    # Try case-insensitive match
+
+    # 2. Case-insensitive exact match
     name_lower = name.lower()
     for (s, cn), fips in COUNTY_FIPS.items():
         if s == st and cn.lower() == name_lower:
             return fips
-    
-    # Try stripping suffixes and matching
+
+    # 3. Strip suffixes and try exact match on the base
     suffixes = [" county", " parish", " borough", " census area",
                 " municipality", " city and borough", " city", " municipio"]
+    base = name_lower
     for suffix in suffixes:
         if name_lower.endswith(suffix):
             base = name_lower[:-len(suffix)].strip()
-            for (s, cn), fips in COUNTY_FIPS.items():
-                cn_lower = cn.lower()
-                if s == st and (cn_lower == base or cn_lower.startswith(base)):
-                    return fips
-    
-    # Try matching just the base name against any county in the state
+            break
+
+    # Try base as exact match against suffix-stripped canonical names
     for (s, cn), fips in COUNTY_FIPS.items():
-        if s == st and name_lower in cn.lower():
+        if s != st:
+            continue
+        cn_lower = cn.lower()
+        cn_base = cn_lower
+        for suffix in suffixes:
+            if cn_lower.endswith(suffix):
+                cn_base = cn_lower[:-len(suffix)].strip()
+                break
+        if cn_base == base:
             return fips
-    
+
+    # 4. Base name matches start of canonical name at a word boundary
+    #    e.g., "benton" matches "benton county" but "clay" does NOT match "clayton county"
+    base_with_space = base + " "
+    for (s, cn), fips in COUNTY_FIPS.items():
+        if s == st and (cn.lower() == base or cn.lower().startswith(base_with_space)):
+            return fips
+
     return None

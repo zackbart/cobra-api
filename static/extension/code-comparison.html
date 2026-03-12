@@ -34,8 +34,8 @@
         NOx: "SUM(NOx (Tons) - Electric (CodeComp))",
         VOC: "SUM(VOC (Tons) - Electric (CodeComp))"
       };
-      var STATE_PARAMS = ["State", "Select State", "State_Abbr", "State_Region", "State/Grid Region", "COBRA_State"];
-      var COUNTY_PARAMS = ["County", "County Selection", "County?", "County_Name", "COBRA_County"];
+      var STATE_PARAMS = ["In.State", "State", "Select State", "State_Abbr", "State_Region", "State/Grid Region", "COBRA_State"];
+      var COUNTY_PARAMS = ["In.County Name.2", "County", "County Selection", "County?", "County_Name", "COBRA_County"];
 
       var dashboard = null;
       var initDone = false;
@@ -82,8 +82,8 @@
             debugLines.push("From params: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
 
             // Prefer "State Selection" / "County Selection" filters (visible dropdowns) over "Select State" / "County?" params
-            var filterCounty = await COBRA.findFilterValue(dashboard, ["County Selection", "County", "County?"]);
-            var filterState = await COBRA.findFilterValue(dashboard, ["State Selection", "State", "State/Grid Region"]);
+            var filterCounty = await COBRA.findFilterValue(dashboard, ["In.County Name.2", "County Selection", "County", "County?"]);
+            var filterState = await COBRA.findFilterValue(dashboard, ["In.State", "State Selection", "State", "State/Grid Region"]);
             debugLines.push("From filters: State=" + (filterState || "(none)") + ", County=" + (filterCounty || "(none)"));
 
             // Prefer filter values if params didn't match well

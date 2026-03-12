@@ -29,6 +29,9 @@ STATE_NAME_TO_ABBREV = {
     "PUERTO RICO": "PR",
 }
 
+# Reverse: 2-digit FIPS -> state abbreviation
+FIPS_TO_STATE = {fips: abbrev for abbrev, fips in STATE_TO_FIPS.items()}
+
 # eGRID subregion acronym -> 2-digit state FIPS (primary state for multi-state regions)
 EGRID_TO_FIPS = {
     "AKGD": "02",   # ASCC Alaska Grid
@@ -65,13 +68,22 @@ NATIONAL_ALIASES = {"national", "usa", "00", "us", "fipsst", "pstatabb"}
 
 
 def normalize_state_abbrev(value: str) -> str | None:
-    """Normalize state input to 2-letter abbreviation when possible."""
+    """Normalize state input to 2-letter abbreviation when possible.
+
+    Accepts: 2-letter abbreviation, full state name, or 2-digit FIPS code.
+    """
     if value is None:
         return None
     v = value.strip().upper()
     if v in STATE_TO_FIPS:
         return v
-    return STATE_NAME_TO_ABBREV.get(v)
+    abbrev = STATE_NAME_TO_ABBREV.get(v)
+    if abbrev:
+        return abbrev
+    # Try 2-digit FIPS code
+    if len(v) == 2 and v.isdigit() and v in FIPS_TO_STATE:
+        return FIPS_TO_STATE[v]
+    return None
 
 
 def region_to_fips(region: str) -> str:
