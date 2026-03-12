@@ -64,8 +64,18 @@ async def health_effects(
     source: str | None = Query(None, description="Extension: code_comparison, custom_module, policy_module"),
 ):
     """Run COBRA scenario(s), return National + State + County health effects."""
-    # Normalize: treat blank county_name as no county (state-level only)
+    # Normalize: treat blank or "all" county_name as no county (state-level only)
     county_name = (req.county_name or "").strip() or None
+    if county_name:
+        _lower = county_name.lower()
+        _all_sentinels = {
+            "(all)", "all", "(all values)", "all values",
+            "all counties", "(all counties)", "all parishes", "(all parishes)",
+            "none", "select", "select county", "select a county",
+            "-- all --", "statewide", "entire state",
+        }
+        if _lower in _all_sentinels or _lower.startswith("all "):
+            county_name = None
 
     # Resolve FIPS: prefer state/county_name if provided, fall back to region
     if req.state and county_name:

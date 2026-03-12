@@ -318,8 +318,15 @@ var COBRA = (function () {
     if (c === "") return null;
     var lower = c.toLowerCase();
     // Treat common "no selection" sentinel values as null (state-level only)
-    var noSelectionValues = ["(all)", "all", "(all values)", "all values", "none", "select", "select county", "statewide"];
+    var noSelectionValues = [
+      "(all)", "all", "(all values)", "all values",
+      "all counties", "(all counties)", "all parishes", "(all parishes)",
+      "none", "select", "select county", "select a county",
+      "-- all --", "statewide", "entire state"
+    ];
     if (noSelectionValues.indexOf(lower) >= 0) return null;
+    // Also catch any value starting with "all " (e.g. "All Alabama Counties")
+    if (lower.indexOf("all ") === 0) return null;
     return c;
   }
 
@@ -370,10 +377,13 @@ var COBRA = (function () {
                   return String(val);
                 }
               }
-              if (filter.appliedValues && filter.appliedValues.length > 0) {
-                console.log("[COBRA] Filter '" + filter.fieldName + "' has " + filter.appliedValues.length + " values: " +
-                  filter.appliedValues.map(function(v) { return v.nativeValue || v.value || v.formattedValue; }).join(", "));
+              // Filter exists but has 0 or >1 applied values — this means
+              // "all" or multi-select. Stop searching immediately so we don't
+              // pick up a stale single value from a different worksheet.
+              if (filter.appliedValues) {
+                console.log("[COBRA] Filter '" + filter.fieldName + "' has " + filter.appliedValues.length + " applied values (all/multi) on worksheet '" + worksheets[w].name + "' — treating as no selection");
               }
+              return null;
             }
           }
         } catch (e) {

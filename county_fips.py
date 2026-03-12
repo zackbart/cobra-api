@@ -3241,6 +3241,12 @@ COUNTY_FIPS: dict[tuple[str, str], str] = {
 }
 
 
+def get_state_county_fips(state_abbrev: str) -> list[str]:
+    """Return a sorted list of all 5-digit FIPS codes for a given state abbreviation."""
+    st = state_abbrev.strip().upper()
+    return sorted({fips for (s, _), fips in COUNTY_FIPS.items() if s == st})
+
+
 def normalize_county_name(name: str) -> str:
     """Normalize county name for lookup."""
     n = name.strip()

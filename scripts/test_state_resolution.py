@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from region_map import normalize_state_abbrev, region_to_fips, resolve_state_county
-from county_fips import resolve_county_fips
+from county_fips import get_state_county_fips, resolve_county_fips
 
 
 class TestStateResolution(unittest.TestCase):
@@ -94,9 +94,20 @@ class TestServerRoutingLogic(unittest.TestCase):
     what the client sends in the request payload.
     """
 
+    _ALL_SENTINELS = {
+        "(all)", "all", "(all values)", "all values",
+        "all counties", "(all counties)", "all parishes", "(all parishes)",
+        "none", "select", "select county", "select a county",
+        "-- all --", "statewide", "entire state",
+    }
+
     def _resolve_like_server(self, state, county_name_raw):
-        """Replicate the normalization + routing from main.py lines 67-98."""
+        """Replicate the normalization + routing from main.py."""
         county_name = (county_name_raw or "").strip() or None
+        if county_name:
+            _lower = county_name.lower()
+            if _lower in self._ALL_SENTINELS or _lower.startswith("all "):
+                county_name = None
 
         if state and county_name:
             fips = resolve_state_county(state, county_name)
@@ -168,6 +179,58 @@ class TestServerRoutingLogic(unittest.TestCase):
         fips_without_county = self._resolve_like_server("AR", None)
         self.assertEqual(len(fips_without_county), 2)  # state-level
         self.assertEqual(fips_without_county, "05")
+
+    # Scenario: server-side sentinel normalization catches "all" county values
+    def test_sentinel_all_counties_normalized(self):
+        """Server normalizes 'All Counties' to state-level."""
+        sentinels = ["All Counties", "(All)", "all", "All Values", "Statewide",
+                     "All Alabama Counties", "select county", "entire state"]
+        for s in sentinels:
+            fips = self._resolve_like_server("AL", s)
+            self.assertEqual(len(fips), 2, f"'{s}' should resolve to state-level, got {fips}")
+
+    def test_real_county_not_caught_by_sentinels(self):
+        """Real county names must not be caught by sentinel matching."""
+        fips = self._resolve_like_server("GA", "Clayton County")
+        self.assertEqual(fips, "13063")
+        fips = self._resolve_like_server("AR", "Benton County")
+        self.assertEqual(fips, "05007")
+
+
+class TestCountyEnumeration(unittest.TestCase):
+    """Verify get_state_county_fips returns correct county lists for states."""
+
+    def test_alabama_county_count(self):
+        """Alabama has 67 counties."""
+        codes = get_state_county_fips("AL")
+        self.assertEqual(len(codes), 67)
+
+    def test_alabama_all_five_digit(self):
+        """All Alabama FIPS codes should be 5-digit strings starting with '01'."""
+        codes = get_state_county_fips("AL")
+        for code in codes:
+            self.assertEqual(len(code), 5, f"Expected 5-digit FIPS, got '{code}'")
+            self.assertTrue(code.startswith("01"), f"Alabama FIPS should start with '01', got '{code}'")
+
+    def test_texas_county_count(self):
+        """Texas has 254 counties."""
+        codes = get_state_county_fips("TX")
+        self.assertEqual(len(codes), 254)
+
+    def test_case_insensitive(self):
+        """Should accept lowercase state abbreviation."""
+        codes = get_state_county_fips("al")
+        self.assertEqual(len(codes), 67)
+
+    def test_invalid_state_returns_empty(self):
+        """Invalid state abbreviation returns empty list."""
+        codes = get_state_county_fips("XX")
+        self.assertEqual(codes, [])
+
+    def test_sorted_output(self):
+        """Output should be sorted."""
+        codes = get_state_county_fips("AL")
+        self.assertEqual(codes, sorted(codes))
 
 
 if __name__ == "__main__":
