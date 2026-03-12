@@ -314,9 +314,13 @@ var COBRA = (function () {
    */
   function normalizeCountyForPayload(county) {
     if (!county) return null;
-    var c = String(county).trim().toLowerCase();
-    if (c === "(all)" || c === "all") return null;
-    return county;
+    var c = String(county).trim();
+    if (c === "") return null;
+    var lower = c.toLowerCase();
+    // Treat common "no selection" sentinel values as null (state-level only)
+    var noSelectionValues = ["(all)", "all", "(all values)", "all values", "none", "select", "select county", "statewide"];
+    if (noSelectionValues.indexOf(lower) >= 0) return null;
+    return c;
   }
 
   /**

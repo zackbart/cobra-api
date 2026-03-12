@@ -64,10 +64,13 @@ async def health_effects(
     source: str | None = Query(None, description="Extension: code_comparison, custom_module, policy_module"),
 ):
     """Run COBRA scenario(s), return National + State + County health effects."""
+    # Normalize: treat blank county_name as no county (state-level only)
+    county_name = (req.county_name or "").strip() or None
+
     # Resolve FIPS: prefer state/county_name if provided, fall back to region
-    if req.state and req.county_name:
+    if req.state and county_name:
         try:
-            fips = resolve_state_county(req.state, req.county_name)
+            fips = resolve_state_county(req.state, county_name)
         except ValueError:
             # State format may not be an abbreviation/name (e.g. FIPS code).
             # Resolve state first, then retry county lookup before giving up.
@@ -75,7 +78,7 @@ async def health_effects(
                 state_fips_resolved = region_to_fips(req.state)
                 st_abbrev = normalize_state_abbrev(req.state)
                 if st_abbrev:
-                    fips = resolve_state_county(st_abbrev, req.county_name)
+                    fips = resolve_state_county(st_abbrev, county_name)
                 else:
                     # Can't determine abbreviation — fall back to state-level
                     fips = state_fips_resolved
