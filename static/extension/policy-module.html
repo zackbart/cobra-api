@@ -83,7 +83,17 @@
             var filterState = await COBRA.findFilterValue(dashboard, ["In.State", "State Selection", "State", "State/Grid Region"]);
             debugLines.push("From filters: State=" + (filterState || "(none)") + ", County=" + (filterCounty || "(none)"));
             if (filterState) state = filterState;
-            if (filterCounty) county = filterCounty;
+            if (filterCounty) {
+              county = filterCounty;
+            } else {
+              // If a county filter exists but returned no single value, the user
+              // selected "All" or multiple counties — clear any stale param value
+              var countyFilterExists = await COBRA.findFilterExists(dashboard, ["In.County Name.2", "County Selection", "County", "County?"]);
+              if (countyFilterExists) {
+                debugLines.push("County filter exists but no single value selected — treating as state-level");
+                county = null;
+              }
+            }
             county = COBRA.normalizeCountyForPayload(county);
             debugLines.push("Using: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
 

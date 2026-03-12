@@ -324,6 +324,28 @@ var COBRA = (function () {
   }
 
   /**
+   * Check whether a filter field exists on any worksheet, regardless of applied values.
+   * Returns true if the filter is found (even with 0 or multiple applied values).
+   * Use this to distinguish "filter not present" from "filter set to all/multiple."
+   */
+  async function findFilterExists(dashboard, fieldNames) {
+    var worksheets = dashboard.worksheets || [];
+    for (var n = 0; n < fieldNames.length; n++) {
+      var target = fieldNames[n].toLowerCase();
+      for (var w = 0; w < worksheets.length; w++) {
+        try {
+          var filters = await worksheets[w].getFiltersAsync();
+          for (var f = 0; f < filters.length; f++) {
+            var fname = (filters[f].fieldName || "").toLowerCase();
+            if (fname === target) return true;
+          }
+        } catch (e) { /* skip worksheet */ }
+      }
+    }
+    return false;
+  }
+
+  /**
    * Read a single-select filter value from any worksheet on the dashboard.
    * Tries each field name in order so that preferred names (e.g. "County Selection")
    * win over others (e.g. "County?") when multiple filters match.
@@ -506,6 +528,7 @@ var COBRA = (function () {
     sectorLabel: sectorLabel,
     renderHealthTable: renderHealthTable,
     findParamValue: findParamValue,
+    findFilterExists: findFilterExists,
     findFilterValue: findFilterValue,
     normalizeCountyForPayload: normalizeCountyForPayload,
     readWorksheetPollutants: readWorksheetPollutants,
