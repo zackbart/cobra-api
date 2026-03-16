@@ -29,9 +29,9 @@ def store_results(data: dict) -> None:
     r.raise_for_status()
 
 
-def get_latest_results() -> dict:
+def get_latest_results(source: str = "default") -> dict:
     """GET /latest-results (what Detail view fetches)."""
-    r = httpx.get(f"{API_BASE}/latest-results", timeout=30)
+    r = httpx.get(f"{API_BASE}/latest-results", params={"source": source}, timeout=30)
     r.raise_for_status()
     return r.json()
 
