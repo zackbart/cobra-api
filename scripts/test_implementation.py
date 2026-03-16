@@ -16,7 +16,14 @@ MOCK_RESULT = {
         "TotalHealthBenefitsValue_high": 200000,
     },
     "Impacts": [
-        {"FIPS": "36061", "C__Total_Health_Benefits_Low_Value": 50000, "C__Total_Health_Benefits_High_Value": 100000}
+        {"FIPS": "05007", "STATE": "Arkansas", "COUNTY": "Benton",
+         "C__Total_Health_Benefits_Low_Value": 25000, "C__Total_Health_Benefits_High_Value": 50000},
+        {"FIPS": "05001", "STATE": "Arkansas", "COUNTY": "Arkansas",
+         "C__Total_Health_Benefits_Low_Value": 10000, "C__Total_Health_Benefits_High_Value": 20000},
+        {"FIPS": "36061", "STATE": "New York", "COUNTY": "New York",
+         "C__Total_Health_Benefits_Low_Value": 50000, "C__Total_Health_Benefits_High_Value": 100000},
+        {"FIPS": "36001", "STATE": "New York", "COUNTY": "Albany",
+         "C__Total_Health_Benefits_Low_Value": 15000, "C__Total_Health_Benefits_High_Value": 30000},
     ],
 }
 
@@ -146,7 +153,7 @@ def test_store_and_fetch():
         store_resp = client.post("/store-results", json=payload)
         assert store_resp.status_code == 200
 
-        fetch_resp = client.get("/latest-results")
+        fetch_resp = client.get("/latest-results?source=default")
         assert fetch_resp.status_code == 200
         fetched = fetch_resp.json()
         assert fetched["HealthEndpoints_by_sector"]["grid"]["national"][0]["HealthEndpoint"] == "Mortality"

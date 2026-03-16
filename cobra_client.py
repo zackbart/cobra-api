@@ -39,9 +39,9 @@ async def update_emissions(token: str, fipscodes: list[str], tiers: str, payload
     r.raise_for_status()
 
 
-async def get_result(token: str, filter_fips: str | None = None, discount_rate: float = 3) -> dict:
-    url = f"{BASE}/Result/{token}" + (f"/{filter_fips}" if filter_fips else "")
-    r = await _get_client().get(url, params={"discountrate": discount_rate})
+async def get_result(token: str, discount_rate: float = 3) -> dict:
+    """Fetch full result (Summary + all-county Impacts) for a completed scenario."""
+    r = await _get_client().get(f"{BASE}/Result/{token}", params={"discountrate": discount_rate})
     r.raise_for_status()
     return r.json()
 

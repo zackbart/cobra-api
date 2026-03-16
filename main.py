@@ -12,9 +12,23 @@ from pydantic import BaseModel
 from cobra_client import get_result, run_scenario
 from health_endpoints import aggregate_health_endpoints
 from region_map import normalize_state_abbrev, region_to_fips, resolve_state_county
-from sector_map import get_tiers, get_tiers_for_fuel, get_tiers_for_fuel_by_source
+from sector_map import get_tiers, get_tiers_for_fuel_by_source
 
 app = FastAPI(title="COBRA Proxy", docs_url="/")
+
+
+def _filter_impacts(impacts: list[dict], fips_prefix: str | None) -> list[dict]:
+    """Filter Impacts rows by FIPS prefix (2-digit state, 5-digit county, or None for all)."""
+    if not fips_prefix:
+        return impacts
+    return [r for r in impacts if str(r.get("FIPS", "")).startswith(fips_prefix)]
+
+
+def _summarize_impacts(impacts: list[dict]) -> dict:
+    """Sum C__Total_Health_Benefits values from Impacts rows into a Summary dict."""
+    low = sum(float(r.get("C__Total_Health_Benefits_Low_Value", 0) or 0) for r in impacts)
+    high = sum(float(r.get("C__Total_Health_Benefits_High_Value", 0) or 0) for r in impacts)
+    return {"TotalHealthBenefitsValue_low": low, "TotalHealthBenefitsValue_high": high}
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -107,18 +121,18 @@ async def health_effects(
     else:
         raise HTTPException(400, "Provide region, or state (+ optional county_name)")
 
+    # Always run scenarios at state level; county is a presentation filter only.
     if fips == "00":
-        fipscodes = ["36"]
         state_fips = "36"
         county_fips = None
     elif len(fips) == 2:
-        fipscodes = [fips]
         state_fips = fips
         county_fips = None
     else:
-        fipscodes = [fips]
         state_fips = fips[:2]
         county_fips = fips
+
+    fipscodes = [state_fips]
 
     # Per-fuel mode: run sectors concurrently, sum results, add by_sector
     if req.emissions_by_fuel:
@@ -127,10 +141,9 @@ async def health_effects(
             emissions = {"PM25": float(em.get("PM25", 0) or 0), "SO2": float(em.get("SO2", 0) or 0),
                         "NOx": float(em.get("NOx", 0) or 0), "VOC": float(em.get("VOC", 0) or 0)}
             token = await run_scenario(fipscodes, tiers, emissions)
-            national = await get_result(token, "00" if fips == "00" else None)
-            state = await get_result(token, state_fips)
-            county = await get_result(token, county_fips) if county_fips else None
-            return (fuel_key, {"national": national, "state": state, "county": county})
+            result = await get_result(token)
+            impacts = result.get("Impacts", [])
+            return (fuel_key, impacts)
 
         tasks = []
         for fuel_key, em in req.emissions_by_fuel.items():
@@ -151,61 +164,61 @@ async def health_effects(
             raise HTTPException(400, "No emissions in emissions_by_fuel")
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
+        # fuels_data: list of (fuel_key, impacts_list)
         fuels_data = []
         for r in results:
             if isinstance(r, Exception):
                 raise HTTPException(502, str(r))
             fuels_data.append(r)
 
-        # fuels_data: list of (fuel_key, {national, state, county})
-        fuel_entries = [x[1] for x in fuels_data]
-        fuel_keys = [x[0] for x in fuels_data]
+        fuel_keys = [fk for fk, _ in fuels_data]
+        fuel_impacts = [imps for _, imps in fuels_data]
 
-        def sum_summary(data_list, geo):
+        def geo_summary(impacts_list, fips_prefix):
+            """Sum summaries across fuels for a given geography."""
             low = high = 0
-            for d in data_list:
-                s = d[geo].get("Summary", {}) if d[geo] else {}
-                low += float(s.get("TotalHealthBenefitsValue_low") or 0)
-                high += float(s.get("TotalHealthBenefitsValue_high") or 0)
+            for imps in impacts_list:
+                s = _summarize_impacts(_filter_impacts(imps, fips_prefix))
+                low += s["TotalHealthBenefitsValue_low"]
+                high += s["TotalHealthBenefitsValue_high"]
             return {"TotalHealthBenefitsValue_low": low, "TotalHealthBenefitsValue_high": high}
 
-        def build_by_sector(data_list, geo):
+        def by_sector(impacts_list, fips_prefix):
+            """Per-fuel summaries for a given geography."""
             return {
-                fk: {
-                    "TotalHealthBenefitsValue_low": float(d[geo].get("Summary", {}).get("TotalHealthBenefitsValue_low") or 0),
-                    "TotalHealthBenefitsValue_high": float(d[geo].get("Summary", {}).get("TotalHealthBenefitsValue_high") or 0),
-                }
-                for fk, d in zip(fuel_keys, data_list) if d[geo]
+                fk: _summarize_impacts(_filter_impacts(imps, fips_prefix))
+                for fk, imps in zip(fuel_keys, impacts_list)
             }
 
-        national_merged = {"Summary": sum_summary(fuel_entries, "national"), "by_sector": build_by_sector(fuel_entries, "national")}
-        state_merged = {"Summary": sum_summary(fuel_entries, "state"), "by_sector": build_by_sector(fuel_entries, "state")}
-        county_merged = {"Summary": sum_summary(fuel_entries, "county"), "by_sector": build_by_sector(fuel_entries, "county")} if county_fips else None
+        national_merged = {"Summary": geo_summary(fuel_impacts, None), "by_sector": by_sector(fuel_impacts, None)}
+        state_merged = {"Summary": geo_summary(fuel_impacts, state_fips), "by_sector": by_sector(fuel_impacts, state_fips)}
+        county_merged = {"Summary": geo_summary(fuel_impacts, county_fips), "by_sector": by_sector(fuel_impacts, county_fips)} if county_fips else None
 
-        # Merge Impacts for combined HealthEndpoints; per-sector HealthEndpoints from each fuel
+        # Merge Impacts across fuels for HealthEndpoints
         if include_impacts or include_health_endpoints:
-            def merge_impacts(data_list, geo):
-                imps = [d[geo].get("Impacts", []) for d in data_list if d[geo] and d[geo].get("Impacts")]
-                if not imps:
+            def merge_impacts(impacts_list, fips_prefix):
+                filtered = [_filter_impacts(imps, fips_prefix) for imps in impacts_list]
+                filtered = [f for f in filtered if f]
+                if not filtered:
                     return []
-                n = min(len(p) for p in imps)
+                n = min(len(f) for f in filtered)
                 merged = []
                 for i in range(n):
                     row = {}
-                    for k in imps[0][i].keys():
+                    for k in filtered[0][i].keys():
                         if k in ("ID", "destindx", "FIPS", "COUNTY", "STATE"):
-                            row[k] = imps[0][i].get(k)
+                            row[k] = filtered[0][i].get(k)
                         else:
                             try:
-                                row[k] = sum(float(p[i].get(k, 0) or 0) for p in imps if i < len(p) and p[i])
+                                row[k] = sum(float(f[i].get(k, 0) or 0) for f in filtered if i < len(f) and f[i])
                             except (TypeError, ValueError, KeyError):
-                                row[k] = imps[0][i].get(k, 0)
+                                row[k] = filtered[0][i].get(k, 0)
                     merged.append(row)
                 return merged
 
-            national_imps = merge_impacts(fuel_entries, "national")
-            state_imps = merge_impacts(fuel_entries, "state")
-            county_imps = merge_impacts(fuel_entries, "county") if county_fips else []
+            national_imps = merge_impacts(fuel_impacts, None)
+            state_imps = merge_impacts(fuel_impacts, state_fips)
+            county_imps = merge_impacts(fuel_impacts, county_fips) if county_fips else []
 
             if include_impacts:
                 national_merged["Impacts"] = national_imps
@@ -223,11 +236,11 @@ async def health_effects(
                 }
                 health_endpoints_by_sector = {
                     fk: {
-                        "national": aggregate_health_endpoints(d["national"].get("Impacts", [])),
-                        "state": aggregate_health_endpoints(d["state"].get("Impacts", [])),
-                        "county": aggregate_health_endpoints(d["county"].get("Impacts", [])) if county_fips and d["county"] else [],
+                        "national": aggregate_health_endpoints(_filter_impacts(imps, None)),
+                        "state": aggregate_health_endpoints(_filter_impacts(imps, state_fips)),
+                        "county": aggregate_health_endpoints(_filter_impacts(imps, county_fips)) if county_fips else [],
                     }
-                    for fk, d in fuels_data
+                    for fk, imps in fuels_data
                 }
 
         result = {
@@ -255,34 +268,30 @@ async def health_effects(
     except Exception as e:
         raise HTTPException(502, f"COBRA API error: {e}")
 
-    national = await get_result(token, "00" if fips == "00" else None)
-    state = await get_result(token, state_fips)
-    county = await get_result(token, county_fips) if county_fips else None
+    raw = await get_result(token)
+    impacts = raw.get("Impacts", [])
 
-    def summary(data):
-        s = data.get("Summary", {})
-        return {
-            "TotalHealthBenefitsValue_low": s.get("TotalHealthBenefitsValue_low"),
-            "TotalHealthBenefitsValue_high": s.get("TotalHealthBenefitsValue_high"),
-        }
+    national_imps = _filter_impacts(impacts, None)
+    state_imps = _filter_impacts(impacts, state_fips)
+    county_imps = _filter_impacts(impacts, county_fips) if county_fips else []
 
-    def format_result(data):
-        out = {"Summary": summary(data)}
+    def format_result(filtered_imps):
+        out = {"Summary": _summarize_impacts(filtered_imps)}
         if include_impacts:
-            out["Impacts"] = data.get("Impacts", [])
+            out["Impacts"] = filtered_imps
         return out
 
     result = {
-        "national": format_result(national),
-        "state": format_result(state),
-        "county": format_result(county) if county else None,
+        "national": format_result(national_imps),
+        "state": format_result(state_imps),
+        "county": format_result(county_imps) if county_fips else None,
     }
 
     if include_health_endpoints:
         result["HealthEndpoints"] = {
-            "national": aggregate_health_endpoints(national.get("Impacts", [])),
-            "state": aggregate_health_endpoints(state.get("Impacts", [])),
-            "county": aggregate_health_endpoints(county.get("Impacts", [])) if county else [],
+            "national": aggregate_health_endpoints(national_imps),
+            "state": aggregate_health_endpoints(state_imps),
+            "county": aggregate_health_endpoints(county_imps) if county_fips else [],
         }
 
     return result
