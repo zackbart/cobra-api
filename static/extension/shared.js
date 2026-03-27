@@ -180,7 +180,10 @@ var COBRA = (function () {
     }
 
     function resolvePollutant(fieldName) {
-      if (exactMeasureNames) return matchPollutantByExactNames(fieldName, exactMeasureNames);
+      if (exactMeasureNames) {
+        var exact = matchPollutantByExactNames(fieldName, exactMeasureNames);
+        if (exact) return exact;
+      }
       return matchPollutantName(fieldName);
     }
 
