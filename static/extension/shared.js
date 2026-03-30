@@ -365,6 +365,9 @@ var COBRA = (function () {
     var worksheets = dashboard.worksheets || [];
     for (var n = 0; n < fieldNames.length; n++) {
       var target = fieldNames[n].toLowerCase();
+      var singleValues = [];  // single-value matches across worksheets
+      var foundFilter = false;
+      var allMulti = true;    // true until we find a single-value match
       for (var w = 0; w < worksheets.length; w++) {
         try {
           var filters = await worksheets[w].getFiltersAsync();
@@ -372,26 +375,44 @@ var COBRA = (function () {
             var filter = filters[f];
             var fname = (filter.fieldName || "").toLowerCase();
             if (fname === target) {
+              foundFilter = true;
               if (filter.appliedValues && filter.appliedValues.length === 1) {
                 var v = filter.appliedValues[0];
                 var val = v.nativeValue !== undefined ? v.nativeValue : (v.value || v.formattedValue);
                 if (val != null && val !== "") {
                   console.log("[COBRA] Filter '" + filter.fieldName + "' = " + val + " (from worksheet '" + worksheets[w].name + "')");
-                  return String(val);
+                  singleValues.push(String(val));
+                  allMulti = false;
                 }
+              } else if (filter.appliedValues) {
+                console.log("[COBRA] Filter '" + filter.fieldName + "' has " + filter.appliedValues.length + " applied values (all/multi) on worksheet '" + worksheets[w].name + "'");
               }
-              // Filter exists but has 0 or >1 applied values — this means
-              // "all" or multi-select. Stop searching immediately so we don't
-              // pick up a stale single value from a different worksheet.
-              if (filter.appliedValues) {
-                console.log("[COBRA] Filter '" + filter.fieldName + "' has " + filter.appliedValues.length + " applied values (all/multi) on worksheet '" + worksheets[w].name + "' — treating as no selection");
-              }
-              return null;
+              break; // only one filter per worksheet can match this name
             }
           }
         } catch (e) {
           console.log("[COBRA] Error reading filters from '" + worksheets[w].name + "': " + e.message);
         }
+      }
+      if (singleValues.length > 0) {
+        // Use the most common single value across worksheets (handles stale outliers)
+        var counts = {};
+        for (var s = 0; s < singleValues.length; s++) {
+          counts[singleValues[s]] = (counts[singleValues[s]] || 0) + 1;
+        }
+        var best = singleValues[0], bestCount = 0;
+        for (var key in counts) {
+          if (counts[key] > bestCount) { best = key; bestCount = counts[key]; }
+        }
+        if (singleValues.length > 1 && bestCount < singleValues.length) {
+          console.log("[COBRA] Filter '" + target + "' has conflicting values across worksheets: " + JSON.stringify(counts) + " — using majority: " + best);
+        }
+        return best;
+      }
+      // Filter exists on worksheets but all had multi/all — treat as no selection
+      if (foundFilter && allMulti) {
+        console.log("[COBRA] Filter '" + target + "' found but all worksheets show all/multi — treating as no selection");
+        return null;
       }
     }
     return null;

@@ -51,3 +51,4 @@ python scripts/test_state_resolution.py  # state/county routing tests
 - Tableau extension files in `static/extension/`
 - Docs in `docs/` (arch.md, tableau.md, troubleshooting.md)
 - No `.env` file — no secrets needed locally (EPA COBRA API tokens are ephemeral, fetched at runtime)
+- `findFilterValue` in `shared.js` checks all worksheets for each filter name and uses majority vote to avoid stale values from non-interactive worksheets

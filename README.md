@@ -124,3 +124,7 @@ Open http://localhost:8000 for FastAPI docs.
 - **Fuel oil missing SO2/NOx/VOC**: The custom module's fuel oil worksheet sometimes returns 0 for SO2/NOx/VOC despite the dashboard showing values. Enhanced pollutant name matching (including full names like "Sulfur Dioxide", "Nitrogen") was added but needs Tableau testing. Check browser console for `[COBRA]` debug logs.
 - **Debug logging**: All 3 input extensions currently have verbose debug logging enabled (visible in collapsible "Debug info" section and browser console). Remove once all worksheets read correctly.
 - **Result cache is in-memory**: Cleared on server restart. Single-slot per source.
+
+## Changelog
+
+- **2026-03-30**: Fixed state filter reading stuck on wrong state. `findFilterValue` in shared.js now checks ALL worksheets for each filter name and uses majority vote, instead of short-circuiting on the first worksheet match (which could return a stale value from a non-interactive worksheet).
