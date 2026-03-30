@@ -13,7 +13,7 @@
       <button id="calculate" class="primary">Calculate Health Impacts</button>
     </div>
     <div id="init-status" style="font-size:11px;color:#888;margin-top:4px;"></div>
-    <div style="font-size:9px;color:#aaa;">v2026.03.30a</div>
+    <div style="font-size:9px;color:#aaa;">v2026.03.30b</div>
   </div>
 
   <div id="results-view" style="display:none">
@@ -207,7 +207,9 @@
           document.getElementById("calc-view").style.display = "none";
 
         } catch (e) {
-          resultsDiv.innerHTML = '<div class="results-box"><p class="error">Error: ' + e.message + '</p></div>';
+          resultsDiv.innerHTML = '<div class="results-box"><p class="error">Error: ' + e.message + '</p>' +
+            '<details open style="margin-top:12px;font-size:11px;color:#888;"><summary>Debug info</summary><pre style="white-space:pre-wrap;">' +
+            (debugLines || []).join("\n") + "\n\nPayload: " + JSON.stringify(payload, null, 2) + '</pre></details></div>';
         } finally {
           btn.disabled = false;
         }
