@@ -313,6 +313,37 @@ var COBRA = (function () {
   }
 
   /**
+   * Read a dimension value from a worksheet's summary data.
+   * fieldNames: array of column names to try (case-insensitive).
+   * Returns the first non-empty value found, or null.
+   */
+  async function readDimensionFromData(worksheet, fieldNames) {
+    try {
+      var data = await worksheet.getSummaryDataAsync();
+      if (!data || !data.columns || !data.data || data.data.length === 0) return null;
+      var cols = data.columns;
+      for (var n = 0; n < fieldNames.length; n++) {
+        var target = fieldNames[n].toLowerCase();
+        for (var ci = 0; ci < cols.length; ci++) {
+          if ((cols[ci].fieldName || "").toLowerCase() === target) {
+            var cell = data.data[0][ci];
+            if (cell) {
+              var val = cell.nativeValue !== undefined ? cell.nativeValue : (cell.formattedValue || cell.value);
+              if (val != null && String(val).trim() !== "") {
+                console.log("[COBRA] Dimension '" + fieldNames[n] + "' = " + val + " (from worksheet '" + worksheet.name + "' data)");
+                return String(val).trim();
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.log("[COBRA] Error reading dimension from '" + worksheet.name + "': " + e.message);
+    }
+    return null;
+  }
+
+  /**
    * Treat "(All)" or "All" as no county selection (state-level). Returns null for those values.
    */
   function normalizeCountyForPayload(county) {
@@ -567,6 +598,7 @@ var COBRA = (function () {
     normalizeCountyForPayload: normalizeCountyForPayload,
     readWorksheetPollutants: readWorksheetPollutants,
     readWorksheetPollutantsByColumns: readWorksheetPollutantsByColumns,
+    readDimensionFromData: readDimensionFromData,
     initExtension: initExtension,
     getSessionId: getSessionId,
     storeResults: storeResults,

@@ -74,50 +74,10 @@
               return p.name + " = " + val;
             }).join(", "));
 
-            var state = COBRA.findParamValue(params, STATE_PARAMS);
-            var county = COBRA.findParamValue(params, COUNTY_PARAMS);
-            debugLines.push("From params: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
-
-            // Check filters too — use filter value only when param is empty or agrees
-            var filterCounty = await COBRA.findFilterValue(dashboard, ["In.County Name.2", "County Selection", "County", "County?"]);
-            var filterState = await COBRA.findFilterValue(dashboard, ["In.State", "State Selection", "State", "State/Grid Region"]);
-            debugLines.push("From filters: State=" + (filterState || "(none)") + ", County=" + (filterCounty || "(none)"));
-            if (filterState) {
-              if (!state) {
-                state = filterState;
-              } else if (state !== filterState) {
-                debugLines.push("CONFLICT: param State=" + state + " vs filter State=" + filterState + " — keeping param value");
-                console.log("[COBRA] State conflict: param=" + state + " filter=" + filterState + " — using param");
-              }
-            }
-            if (filterCounty) {
-              if (!county) {
-                county = filterCounty;
-              } else if (county !== filterCounty) {
-                debugLines.push("CONFLICT: param County=" + county + " vs filter County=" + filterCounty + " — keeping param value");
-                console.log("[COBRA] County conflict: param=" + county + " filter=" + filterCounty + " — using param");
-              }
-            } else {
-              // If a county filter exists but returned no single value, the user
-              // selected "All" or multiple counties — clear any stale param value
-              var countyFilterExists = await COBRA.findFilterExists(dashboard, ["In.County Name.2", "County Selection", "County", "County?"]);
-              if (countyFilterExists) {
-                debugLines.push("County filter exists but no single value selected — treating as state-level");
-                county = null;
-              }
-            }
-            county = COBRA.normalizeCountyForPayload(county);
-            debugLines.push("Using: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
-
-            if (state) {
-              payload.state = String(state);
-              if (county) payload.county_name = String(county);
-            } else {
-              payload.region = "national";
-            }
-
+            // --- Read pollutant data from worksheets ---
             var emissionsByFuel = {};
             var worksheets = dashboard.worksheets || [];
+            var dataWorksheets = []; // track which worksheets we read data from
             debugLines.push("Worksheets: " + worksheets.map(function(w) { return '"' + w.name + '"'; }).join(", "));
 
             for (var i = 0; i < worksheets.length; i++) {
@@ -125,6 +85,7 @@
               var name = ws.name || "";
 
               if (matchesPatterns(name, FUEL_WS_PATTERNS)) {
+                dataWorksheets.push(ws);
                 var fuelData = await COBRA.readWorksheetPollutantsByColumns(ws);
                 if (fuelData) {
                   if (!emissionsByFuel.natural_gas) emissionsByFuel.natural_gas = { PM25: 0, SO2: 0, NOx: 0, VOC: 0 };
@@ -137,6 +98,7 @@
                   debugLines.push('"' + name + '" matched fuel pattern but no pollutant data found');
                 }
               } else if (matchesPatterns(name, GRID_WS_PATTERNS)) {
+                dataWorksheets.push(ws);
                 var gridData = await COBRA.readWorksheetPollutantsByColumns(ws);
                 if (gridData) {
                   if (!emissionsByFuel.grid) emissionsByFuel.grid = { PM25: 0, SO2: 0, NOx: 0, VOC: 0 };
@@ -151,6 +113,57 @@
               } else {
                 debugLines.push('"' + name + '" — no pattern match, skipping');
               }
+            }
+
+            // --- Resolve state/county ---
+            // Strategy: read from worksheet data first (most reliable — reflects
+            // the actual filtered data the user sees), then params, then filters.
+            var STATE_FIELDS = ["In.State", "State", "State_Abbr", "State Selection"];
+            var COUNTY_FIELDS = ["In.County Name.2", "County", "County Name", "County Selection"];
+
+            var state = null;
+            var county = null;
+
+            // 1) Read state/county from the data worksheets' actual data columns
+            for (var d = 0; d < dataWorksheets.length && !state; d++) {
+              state = await COBRA.readDimensionFromData(dataWorksheets[d], STATE_FIELDS);
+            }
+            for (var d = 0; d < dataWorksheets.length && !county; d++) {
+              county = await COBRA.readDimensionFromData(dataWorksheets[d], COUNTY_FIELDS);
+            }
+            debugLines.push("From worksheet data: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
+
+            // 2) Fall back to params
+            if (!state) state = COBRA.findParamValue(params, STATE_PARAMS);
+            if (!county) county = COBRA.findParamValue(params, COUNTY_PARAMS);
+            debugLines.push("After params: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
+
+            // 3) Fall back to filters (last resort)
+            if (!state) {
+              var filterState = await COBRA.findFilterValue(dashboard, ["In.State", "State Selection", "State", "State/Grid Region"]);
+              if (filterState) state = filterState;
+            }
+            if (!county) {
+              var filterCounty = await COBRA.findFilterValue(dashboard, ["In.County Name.2", "County Selection", "County", "County?"]);
+              if (filterCounty) {
+                county = filterCounty;
+              } else {
+                var countyFilterExists = await COBRA.findFilterExists(dashboard, ["In.County Name.2", "County Selection", "County", "County?"]);
+                if (countyFilterExists) {
+                  debugLines.push("County filter exists but no single value selected — treating as state-level");
+                  county = null;
+                }
+              }
+            }
+
+            county = COBRA.normalizeCountyForPayload(county);
+            debugLines.push("Using: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
+
+            if (state) {
+              payload.state = String(state);
+              if (county) payload.county_name = String(county);
+            } else {
+              payload.region = "national";
             }
             payload.emissions_by_fuel = emissionsByFuel;
           } else {
