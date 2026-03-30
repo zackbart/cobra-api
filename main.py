@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -55,10 +56,23 @@ def _evict_expired():
     for k in expired:
         del _result_cache[k]
 
-# Mount Tableau extension static files
+# Serve Tableau extension static files with no-cache headers so Tableau's
+# embedded browser always picks up the latest code after a deploy.
 static_dir = Path(__file__).parent / "static" / "extension"
-if static_dir.exists():
-    app.mount("/extension", StaticFiles(directory=str(static_dir)), name="extension")
+
+@app.get("/extension/{file_path:path}")
+async def serve_extension(file_path: str):
+    full = static_dir / file_path
+    if not full.exists() or not full.is_file():
+        raise HTTPException(404, "Not found")
+    return FileResponse(
+        str(full),
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 class HealthEffectsRequest(BaseModel):
