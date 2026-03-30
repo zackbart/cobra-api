@@ -86,10 +86,22 @@
             var filterState = await COBRA.findFilterValue(dashboard, ["In.State", "State Selection", "State", "State/Grid Region"]);
             debugLines.push("From filters: State=" + (filterState || "(none)") + ", County=" + (filterCounty || "(none)"));
 
-            // Prefer filter values if params didn't match well
-            if (filterState) state = filterState;
+            // Use filter value only when param is empty or agrees — param is the user's explicit selection
+            if (filterState) {
+              if (!state) {
+                state = filterState;
+              } else if (state !== filterState) {
+                debugLines.push("CONFLICT: param State=" + state + " vs filter State=" + filterState + " — keeping param value");
+                console.log("[COBRA] State conflict: param=" + state + " filter=" + filterState + " — using param");
+              }
+            }
             if (filterCounty) {
-              county = filterCounty;
+              if (!county) {
+                county = filterCounty;
+              } else if (county !== filterCounty) {
+                debugLines.push("CONFLICT: param County=" + county + " vs filter County=" + filterCounty + " — keeping param value");
+                console.log("[COBRA] County conflict: param=" + county + " filter=" + filterCounty + " — using param");
+              }
             } else {
               // If a county filter exists but returned no single value, the user
               // selected "All" or multiple counties — clear any stale param value

@@ -78,13 +78,25 @@
             var county = COBRA.findParamValue(params, COUNTY_PARAMS);
             debugLines.push("From params: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
 
-            // Prefer "State Selection" / "County Selection" filters (visible dropdowns) over "Select State" / "County?" params
+            // Check filters too — use filter value only when param is empty or agrees
             var filterCounty = await COBRA.findFilterValue(dashboard, ["In.County Name.2", "County Selection", "County", "County?"]);
             var filterState = await COBRA.findFilterValue(dashboard, ["In.State", "State Selection", "State", "State/Grid Region"]);
             debugLines.push("From filters: State=" + (filterState || "(none)") + ", County=" + (filterCounty || "(none)"));
-            if (filterState) state = filterState;
+            if (filterState) {
+              if (!state) {
+                state = filterState;
+              } else if (state !== filterState) {
+                debugLines.push("CONFLICT: param State=" + state + " vs filter State=" + filterState + " — keeping param value");
+                console.log("[COBRA] State conflict: param=" + state + " filter=" + filterState + " — using param");
+              }
+            }
             if (filterCounty) {
-              county = filterCounty;
+              if (!county) {
+                county = filterCounty;
+              } else if (county !== filterCounty) {
+                debugLines.push("CONFLICT: param County=" + county + " vs filter County=" + filterCounty + " — keeping param value");
+                console.log("[COBRA] County conflict: param=" + county + " filter=" + filterCounty + " — using param");
+              }
             } else {
               // If a county filter exists but returned no single value, the user
               // selected "All" or multiple counties — clear any stale param value
