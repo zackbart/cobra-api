@@ -13,7 +13,7 @@
       <button id="calculate" class="primary">Calculate Health Impacts</button>
     </div>
     <div id="init-status" style="font-size:11px;color:#888;margin-top:4px;"></div>
-    <div style="font-size:9px;color:#aaa;">v2026.03.30b</div>
+    <div style="font-size:9px;color:#aaa;">v2026.03.30c</div>
   </div>
 
   <div id="results-view" style="display:none">
@@ -117,15 +117,21 @@
             }
 
             // --- Resolve state/county ---
-            // Strategy: read from worksheet data first (most reliable — reflects
-            // the actual filtered data the user sees), then params, then filters.
-            var STATE_FIELDS = ["In.State", "State", "State_Abbr", "State Selection"];
-            var COUNTY_FIELDS = ["In.County Name.2", "County", "County Name", "County Selection"];
+            // The policy dashboard has stale Tableau parameters ("Select State",
+            // "County?") that don't reflect the user's current selection.  The
+            // user's actual selection is through dashboard filter cards tied to
+            // data fields "In.State" and "In.County Name.2".  So: read filters
+            // first (from the data worksheets), then fall back to params only as
+            // a last resort.
+            var STATE_FILTER_NAMES = ["In.State", "State Selection", "State", "State/Grid Region"];
+            var COUNTY_FILTER_NAMES = ["In.County Name.2", "County Selection", "County", "County?"];
 
             var state = null;
             var county = null;
 
-            // 1) Read state/county from the data worksheets' actual data columns
+            // 1) Read state/county from worksheet data columns (if present)
+            var STATE_FIELDS = ["In.State", "State", "State_Abbr", "State Selection"];
+            var COUNTY_FIELDS = ["In.County Name.2", "County", "County Name", "County Selection"];
             for (var d = 0; d < dataWorksheets.length && !state; d++) {
               state = await COBRA.readDimensionFromData(dataWorksheets[d], STATE_FIELDS);
             }
@@ -134,27 +140,78 @@
             }
             debugLines.push("From worksheet data: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
 
-            // 2) Fall back to params
-            if (!state) state = COBRA.findParamValue(params, STATE_PARAMS);
-            if (!county) county = COBRA.findParamValue(params, COUNTY_PARAMS);
-            debugLines.push("After params: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
+            // 2) Read from filters on data worksheets specifically (not all worksheets)
+            if (!state || !county) {
+              for (var d = 0; d < dataWorksheets.length; d++) {
+                try {
+                  var wsFilters = await dataWorksheets[d].getFiltersAsync();
+                  debugLines.push("Filters on '" + dataWorksheets[d].name + "': " +
+                    wsFilters.map(function(f) {
+                      var vals = (f.appliedValues || []).map(function(v) {
+                        return v.nativeValue !== undefined ? v.nativeValue : (v.value || v.formattedValue);
+                      });
+                      return f.fieldName + " (" + vals.length + " vals" + (vals.length === 1 ? ": " + vals[0] : "") + ")";
+                    }).join(", "));
+                  for (var f = 0; f < wsFilters.length; f++) {
+                    var filter = wsFilters[f];
+                    var fname = (filter.fieldName || "").toLowerCase();
+                    if (!state) {
+                      for (var sn = 0; sn < STATE_FILTER_NAMES.length; sn++) {
+                        if (fname === STATE_FILTER_NAMES[sn].toLowerCase() && filter.appliedValues && filter.appliedValues.length === 1) {
+                          var sv = filter.appliedValues[0];
+                          state = String(sv.nativeValue !== undefined ? sv.nativeValue : (sv.value || sv.formattedValue));
+                          debugLines.push("State from filter '" + filter.fieldName + "' on '" + dataWorksheets[d].name + "': " + state);
+                          break;
+                        }
+                      }
+                    }
+                    if (!county) {
+                      for (var cn = 0; cn < COUNTY_FILTER_NAMES.length; cn++) {
+                        if (fname === COUNTY_FILTER_NAMES[cn].toLowerCase() && filter.appliedValues && filter.appliedValues.length === 1) {
+                          var cv = filter.appliedValues[0];
+                          county = String(cv.nativeValue !== undefined ? cv.nativeValue : (cv.value || cv.formattedValue));
+                          debugLines.push("County from filter '" + filter.fieldName + "' on '" + dataWorksheets[d].name + "': " + county);
+                          break;
+                        }
+                      }
+                    }
+                  }
+                } catch (e) {
+                  debugLines.push("Error reading filters from '" + dataWorksheets[d].name + "': " + e.message);
+                }
+              }
+            }
+            debugLines.push("After data worksheet filters: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
 
-            // 3) Fall back to filters (last resort)
+            // 3) Fall back to filters on ALL worksheets
             if (!state) {
-              var filterState = await COBRA.findFilterValue(dashboard, ["In.State", "State Selection", "State", "State/Grid Region"]);
-              if (filterState) state = filterState;
+              var filterState = await COBRA.findFilterValue(dashboard, STATE_FILTER_NAMES);
+              if (filterState) {
+                state = filterState;
+                debugLines.push("State from global filter search: " + state);
+              }
             }
             if (!county) {
-              var filterCounty = await COBRA.findFilterValue(dashboard, ["In.County Name.2", "County Selection", "County", "County?"]);
+              var filterCounty = await COBRA.findFilterValue(dashboard, COUNTY_FILTER_NAMES);
               if (filterCounty) {
                 county = filterCounty;
               } else {
-                var countyFilterExists = await COBRA.findFilterExists(dashboard, ["In.County Name.2", "County Selection", "County", "County?"]);
+                var countyFilterExists = await COBRA.findFilterExists(dashboard, COUNTY_FILTER_NAMES);
                 if (countyFilterExists) {
                   debugLines.push("County filter exists but no single value selected — treating as state-level");
                   county = null;
                 }
               }
+            }
+
+            // 4) Last resort: params (may be stale — used only if filters found nothing)
+            if (!state) {
+              state = COBRA.findParamValue(params, STATE_PARAMS);
+              if (state) debugLines.push("State from params (last resort): " + state);
+            }
+            if (!county) {
+              county = COBRA.findParamValue(params, COUNTY_PARAMS);
+              if (county) debugLines.push("County from params (last resort): " + county);
             }
 
             county = COBRA.normalizeCountyForPayload(county);
