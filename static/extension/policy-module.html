@@ -28,8 +28,9 @@
     (function () {
       var FUEL_WS_PATTERNS = ["pollutants reduced from fuel", "fuel use", "policy_natural", "ps_pollu"];
       var GRID_WS_PATTERNS = ["pollutants from grid", "grid use", "electric_gain", "ps_grid", "grid_pollu"];
-      var STATE_PARAMS = ["In.State", "State", "Select State", "State_Abbr", "State_Region", "State/Grid Region", "COBRA_State"];
-      var COUNTY_PARAMS = ["In.County Name.2", "County", "County Selection", "County?", "County_Name", "COBRA_County"];
+      // "Select State" and "County?" are known-stale params on this dashboard — keep them last
+      var STATE_PARAMS = ["In.State", "State", "State_Abbr", "State_Region", "State/Grid Region", "COBRA_State", "Select State"];
+      var COUNTY_PARAMS = ["In.County Name.2", "County", "County Selection", "County_Name", "COBRA_County", "County?"];
 
       var dashboard = null;
 
@@ -141,6 +142,7 @@
             debugLines.push("From worksheet data: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
 
             // 2) Read from filters on data worksheets specifically (not all worksheets)
+            var allDataFilters = []; // collect for broad fallback
             if (!state || !county) {
               for (var d = 0; d < dataWorksheets.length; d++) {
                 try {
@@ -154,10 +156,11 @@
                     }).join(", "));
                   for (var f = 0; f < wsFilters.length; f++) {
                     var filter = wsFilters[f];
+                    allDataFilters.push({ filter: filter, wsName: dataWorksheets[d].name });
                     var fname = (filter.fieldName || "").toLowerCase();
                     if (!state) {
                       for (var sn = 0; sn < STATE_FILTER_NAMES.length; sn++) {
-                        if (fname === STATE_FILTER_NAMES[sn].toLowerCase() && filter.appliedValues && filter.appliedValues.length === 1) {
+                        if (COBRA.fieldNameMatches(fname, STATE_FILTER_NAMES[sn].toLowerCase()) && filter.appliedValues && filter.appliedValues.length === 1) {
                           var sv = filter.appliedValues[0];
                           state = String(sv.nativeValue !== undefined ? sv.nativeValue : (sv.value || sv.formattedValue));
                           debugLines.push("State from filter '" + filter.fieldName + "' on '" + dataWorksheets[d].name + "': " + state);
@@ -167,7 +170,7 @@
                     }
                     if (!county) {
                       for (var cn = 0; cn < COUNTY_FILTER_NAMES.length; cn++) {
-                        if (fname === COUNTY_FILTER_NAMES[cn].toLowerCase() && filter.appliedValues && filter.appliedValues.length === 1) {
+                        if (COBRA.fieldNameMatches(fname, COUNTY_FILTER_NAMES[cn].toLowerCase()) && filter.appliedValues && filter.appliedValues.length === 1) {
                           var cv = filter.appliedValues[0];
                           county = String(cv.nativeValue !== undefined ? cv.nativeValue : (cv.value || cv.formattedValue));
                           debugLines.push("County from filter '" + filter.fieldName + "' on '" + dataWorksheets[d].name + "': " + county);
@@ -182,6 +185,41 @@
               }
             }
             debugLines.push("After data worksheet filters: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
+
+            // 2b) Broad fallback: if targeted matching missed, look for any filter
+            //     whose name contains "state" or "county" with a plausible single value.
+            //     This catches unknown Tableau field name patterns we haven't seen yet.
+            if (!state) {
+              for (var bf = 0; bf < allDataFilters.length; bf++) {
+                var bFilter = allDataFilters[bf].filter;
+                var bName = (bFilter.fieldName || "").toLowerCase();
+                if (bName.indexOf("state") >= 0 && bFilter.appliedValues && bFilter.appliedValues.length === 1) {
+                  var bv = bFilter.appliedValues[0];
+                  var bVal = String(bv.nativeValue !== undefined ? bv.nativeValue : (bv.value || bv.formattedValue)).trim();
+                  // Accept 2-letter state abbreviations only (avoid matching e.g. "Statewide")
+                  if (/^[A-Za-z]{2}$/.test(bVal)) {
+                    state = bVal.toUpperCase();
+                    debugLines.push("State from broad filter fallback '" + bFilter.fieldName + "' on '" + allDataFilters[bf].wsName + "': " + state);
+                    break;
+                  }
+                }
+              }
+            }
+            if (!county) {
+              for (var bf = 0; bf < allDataFilters.length; bf++) {
+                var bFilter = allDataFilters[bf].filter;
+                var bName = (bFilter.fieldName || "").toLowerCase();
+                if (bName.indexOf("county") >= 0 && bFilter.appliedValues && bFilter.appliedValues.length === 1) {
+                  var bv = bFilter.appliedValues[0];
+                  var bVal = String(bv.nativeValue !== undefined ? bv.nativeValue : (bv.value || bv.formattedValue)).trim();
+                  if (bVal) {
+                    county = bVal;
+                    debugLines.push("County from broad filter fallback '" + bFilter.fieldName + "' on '" + allDataFilters[bf].wsName + "': " + county);
+                    break;
+                  }
+                }
+              }
+            }
 
             // 3) Fall back to filters on ALL worksheets
             if (!state) {

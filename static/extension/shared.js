@@ -313,6 +313,31 @@ var COBRA = (function () {
   }
 
   /**
+   * Check if a Tableau field name matches a target name.
+   * Tableau may append qualifiers, brackets, or aggregation wrappers:
+   *   "In.State (Baseline!Metadata!And!Annual!Re)" should match "In.State"
+   *   "ATTR(In.State)" or "[In.State]" should also match "In.State"
+   * Both arguments should already be lowercased.
+   */
+  function fieldNameMatches(actual, target) {
+    if (actual === target) return true;
+    // startsWith target followed by a non-alphanumeric char (space, paren, bracket, etc.)
+    if (actual.length > target.length &&
+        actual.indexOf(target) === 0 &&
+        /[^a-z0-9_]/.test(actual[target.length])) return true;
+    // target appears somewhere inside actual, bounded by non-alphanumeric or string edges
+    // e.g. "attr(in.state)" contains "in.state", "[in.state]" contains "in.state"
+    var idx = actual.indexOf(target);
+    if (idx > 0) {
+      var before = actual[idx - 1];
+      var afterIdx = idx + target.length;
+      var afterOk = afterIdx >= actual.length || /[^a-z0-9_]/.test(actual[afterIdx]);
+      if (/[^a-z0-9_]/.test(before) && afterOk) return true;
+    }
+    return false;
+  }
+
+  /**
    * Read a dimension value from a worksheet's summary data.
    * fieldNames: array of column names to try (case-insensitive).
    * Returns the first non-empty value found, or null.
@@ -325,7 +350,7 @@ var COBRA = (function () {
       for (var n = 0; n < fieldNames.length; n++) {
         var target = fieldNames[n].toLowerCase();
         for (var ci = 0; ci < cols.length; ci++) {
-          if ((cols[ci].fieldName || "").toLowerCase() === target) {
+          if (fieldNameMatches((cols[ci].fieldName || "").toLowerCase(), target)) {
             var cell = data.data[0][ci];
             if (cell) {
               var val = cell.nativeValue !== undefined ? cell.nativeValue : (cell.formattedValue || cell.value);
@@ -378,7 +403,7 @@ var COBRA = (function () {
           var filters = await worksheets[w].getFiltersAsync();
           for (var f = 0; f < filters.length; f++) {
             var fname = (filters[f].fieldName || "").toLowerCase();
-            if (fname === target) return true;
+            if (fieldNameMatches(fname, target)) return true;
           }
         } catch (e) { /* skip worksheet */ }
       }
@@ -405,7 +430,7 @@ var COBRA = (function () {
           for (var f = 0; f < filters.length; f++) {
             var filter = filters[f];
             var fname = (filter.fieldName || "").toLowerCase();
-            if (fname === target) {
+            if (fieldNameMatches(fname, target)) {
               foundFilter = true;
               if (filter.appliedValues && filter.appliedValues.length === 1) {
                 var v = filter.appliedValues[0];
@@ -592,6 +617,7 @@ var COBRA = (function () {
     formatCurrency: formatCurrency,
     sectorLabel: sectorLabel,
     renderHealthTable: renderHealthTable,
+    fieldNameMatches: fieldNameMatches,
     findParamValue: findParamValue,
     findFilterExists: findFilterExists,
     findFilterValue: findFilterValue,
