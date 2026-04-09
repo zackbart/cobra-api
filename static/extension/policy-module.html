@@ -13,7 +13,7 @@
       <button id="calculate" class="primary">Calculate Health Impacts</button>
     </div>
     <div id="init-status" style="font-size:11px;color:#888;margin-top:4px;"></div>
-    <div style="font-size:9px;color:#aaa;">v2026.03.30c</div>
+    <div style="font-size:9px;color:#aaa;">v2026.04.09a</div>
   </div>
 
   <div id="results-view" style="display:none">
@@ -40,6 +40,32 @@
           if (n.indexOf(patterns[i]) >= 0) return true;
         }
         return false;
+      }
+
+      function addVote(votes, value) {
+        var val = value == null ? "" : String(value).trim();
+        if (!val) return;
+        votes[val] = (votes[val] || 0) + 1;
+      }
+
+      function chooseMajorityValue(votes) {
+        var best = null;
+        var bestCount = 0;
+        for (var key in votes) {
+          if (votes[key] > bestCount) {
+            best = key;
+            bestCount = votes[key];
+          }
+        }
+        return best;
+      }
+
+      function formatVoteSummary(votes) {
+        var parts = [];
+        for (var key in votes) {
+          parts.push(key + " x" + votes[key]);
+        }
+        return parts.length ? parts.join(", ") : "(none)";
       }
 
       var calcBtn = document.getElementById("calculate");
@@ -130,19 +156,15 @@
             var state = null;
             var county = null;
 
-            // 1) Read state/county from worksheet data columns (if present)
             var STATE_FIELDS = ["In.State", "State", "State_Abbr", "State Selection"];
             var COUNTY_FIELDS = ["In.County Name.2", "County", "County Name", "County Selection"];
-            for (var d = 0; d < dataWorksheets.length && !state; d++) {
-              state = await COBRA.readDimensionFromData(dataWorksheets[d], STATE_FIELDS);
-            }
-            for (var d = 0; d < dataWorksheets.length && !county; d++) {
-              county = await COBRA.readDimensionFromData(dataWorksheets[d], COUNTY_FIELDS);
-            }
-            debugLines.push("From worksheet data: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
 
-            // 2) Read from filters on data worksheets specifically (not all worksheets)
+            // 1) Read from filters on data worksheets specifically (not all worksheets)
             var allDataFilters = []; // collect for broad fallback
+            var stateVotes = {};
+            var countyVotes = {};
+            var stateFilterFoundOnDataWorksheets = false;
+            var countyFilterFoundOnDataWorksheets = false;
             if (!state || !county) {
               for (var d = 0; d < dataWorksheets.length; d++) {
                 try {
@@ -158,24 +180,28 @@
                     var filter = wsFilters[f];
                     allDataFilters.push({ filter: filter, wsName: dataWorksheets[d].name });
                     var fname = (filter.fieldName || "").toLowerCase();
-                    if (!state) {
-                      for (var sn = 0; sn < STATE_FILTER_NAMES.length; sn++) {
-                        if (COBRA.fieldNameMatches(fname, STATE_FILTER_NAMES[sn].toLowerCase()) && filter.appliedValues && filter.appliedValues.length === 1) {
+                    for (var sn = 0; sn < STATE_FILTER_NAMES.length; sn++) {
+                      if (COBRA.fieldNameMatches(fname, STATE_FILTER_NAMES[sn].toLowerCase())) {
+                        stateFilterFoundOnDataWorksheets = true;
+                        if (filter.appliedValues && filter.appliedValues.length === 1) {
                           var sv = filter.appliedValues[0];
-                          state = String(sv.nativeValue !== undefined ? sv.nativeValue : (sv.value || sv.formattedValue));
-                          debugLines.push("State from filter '" + filter.fieldName + "' on '" + dataWorksheets[d].name + "': " + state);
-                          break;
+                          var stateCandidate = String(sv.nativeValue !== undefined ? sv.nativeValue : (sv.value || sv.formattedValue)).trim();
+                          addVote(stateVotes, stateCandidate);
+                          debugLines.push("State candidate from filter '" + filter.fieldName + "' on '" + dataWorksheets[d].name + "': " + stateCandidate);
                         }
+                        break;
                       }
                     }
-                    if (!county) {
-                      for (var cn = 0; cn < COUNTY_FILTER_NAMES.length; cn++) {
-                        if (COBRA.fieldNameMatches(fname, COUNTY_FILTER_NAMES[cn].toLowerCase()) && filter.appliedValues && filter.appliedValues.length === 1) {
+                    for (var cn = 0; cn < COUNTY_FILTER_NAMES.length; cn++) {
+                      if (COBRA.fieldNameMatches(fname, COUNTY_FILTER_NAMES[cn].toLowerCase())) {
+                        countyFilterFoundOnDataWorksheets = true;
+                        if (filter.appliedValues && filter.appliedValues.length === 1) {
                           var cv = filter.appliedValues[0];
-                          county = String(cv.nativeValue !== undefined ? cv.nativeValue : (cv.value || cv.formattedValue));
-                          debugLines.push("County from filter '" + filter.fieldName + "' on '" + dataWorksheets[d].name + "': " + county);
-                          break;
+                          var countyCandidate = String(cv.nativeValue !== undefined ? cv.nativeValue : (cv.value || cv.formattedValue)).trim();
+                          addVote(countyVotes, countyCandidate);
+                          debugLines.push("County candidate from filter '" + filter.fieldName + "' on '" + dataWorksheets[d].name + "': " + countyCandidate);
                         }
+                        break;
                       }
                     }
                   }
@@ -184,12 +210,23 @@
                 }
               }
             }
+            if (!state) {
+              state = chooseMajorityValue(stateVotes);
+              if (state) debugLines.push("State chosen from data worksheet filters: " + state + " [" + formatVoteSummary(stateVotes) + "]");
+              else if (stateFilterFoundOnDataWorksheets) debugLines.push("State filters found on data worksheets, but no single selected value was available");
+            }
+            if (!county) {
+              county = chooseMajorityValue(countyVotes);
+              if (county) debugLines.push("County chosen from data worksheet filters: " + county + " [" + formatVoteSummary(countyVotes) + "]");
+              else if (countyFilterFoundOnDataWorksheets) debugLines.push("County filters found on data worksheets, but no single selected value was available");
+            }
             debugLines.push("After data worksheet filters: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
 
-            // 2b) Broad fallback: if targeted matching missed, look for any filter
+            // 1b) Broad fallback: if targeted matching missed, look for any filter
             //     whose name contains "state" or "county" with a plausible single value.
             //     This catches unknown Tableau field name patterns we haven't seen yet.
             if (!state) {
+              var broadStateVotes = {};
               for (var bf = 0; bf < allDataFilters.length; bf++) {
                 var bFilter = allDataFilters[bf].filter;
                 var bName = (bFilter.fieldName || "").toLowerCase();
@@ -198,14 +235,16 @@
                   var bVal = String(bv.nativeValue !== undefined ? bv.nativeValue : (bv.value || bv.formattedValue)).trim();
                   // Accept 2-letter state abbreviations only (avoid matching e.g. "Statewide")
                   if (/^[A-Za-z]{2}$/.test(bVal)) {
-                    state = bVal.toUpperCase();
-                    debugLines.push("State from broad filter fallback '" + bFilter.fieldName + "' on '" + allDataFilters[bf].wsName + "': " + state);
-                    break;
+                    addVote(broadStateVotes, bVal.toUpperCase());
+                    debugLines.push("Broad state candidate from '" + bFilter.fieldName + "' on '" + allDataFilters[bf].wsName + "': " + bVal.toUpperCase());
                   }
                 }
               }
+              state = chooseMajorityValue(broadStateVotes);
+              if (state) debugLines.push("State chosen from broad filter fallback: " + state + " [" + formatVoteSummary(broadStateVotes) + "]");
             }
             if (!county) {
+              var broadCountyVotes = {};
               for (var bf = 0; bf < allDataFilters.length; bf++) {
                 var bFilter = allDataFilters[bf].filter;
                 var bName = (bFilter.fieldName || "").toLowerCase();
@@ -213,15 +252,16 @@
                   var bv = bFilter.appliedValues[0];
                   var bVal = String(bv.nativeValue !== undefined ? bv.nativeValue : (bv.value || bv.formattedValue)).trim();
                   if (bVal) {
-                    county = bVal;
-                    debugLines.push("County from broad filter fallback '" + bFilter.fieldName + "' on '" + allDataFilters[bf].wsName + "': " + county);
-                    break;
+                    addVote(broadCountyVotes, bVal);
+                    debugLines.push("Broad county candidate from '" + bFilter.fieldName + "' on '" + allDataFilters[bf].wsName + "': " + bVal);
                   }
                 }
               }
+              county = chooseMajorityValue(broadCountyVotes);
+              if (county) debugLines.push("County chosen from broad filter fallback: " + county + " [" + formatVoteSummary(broadCountyVotes) + "]");
             }
 
-            // 3) Fall back to filters on ALL worksheets
+            // 2) Fall back to filters on ALL worksheets
             if (!state) {
               var filterState = await COBRA.findFilterValue(dashboard, STATE_FILTER_NAMES);
               if (filterState) {
@@ -242,7 +282,20 @@
               }
             }
 
-            // 4) Last resort: params (may be stale — used only if filters found nothing)
+            // 3) Fall back to worksheet data only if it has a single unambiguous value.
+            if (!state) {
+              for (var d = 0; d < dataWorksheets.length && !state; d++) {
+                state = await COBRA.readDimensionFromData(dataWorksheets[d], STATE_FIELDS);
+              }
+            }
+            if (!county) {
+              for (var d = 0; d < dataWorksheets.length && !county; d++) {
+                county = await COBRA.readDimensionFromData(dataWorksheets[d], COUNTY_FIELDS);
+              }
+            }
+            debugLines.push("After worksheet data fallback: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
+
+            // 4) Last resort: params (may be stale — used only if filters/data found nothing)
             if (!state) {
               state = COBRA.findParamValue(params, STATE_PARAMS);
               if (state) debugLines.push("State from params (last resort): " + state);

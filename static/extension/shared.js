@@ -340,7 +340,10 @@ var COBRA = (function () {
   /**
    * Read a dimension value from a worksheet's summary data.
    * fieldNames: array of column names to try (case-insensitive).
-   * Returns the first non-empty value found, or null.
+   * Returns a value only when the worksheet data shows exactly one unique
+   * non-empty value for the matched field. This avoids accidentally taking the
+   * first row from multi-row summary data that is not actually scoped to the
+   * user's current selection.
    */
   async function readDimensionFromData(worksheet, fieldNames) {
     try {
@@ -351,13 +354,26 @@ var COBRA = (function () {
         var target = fieldNames[n].toLowerCase();
         for (var ci = 0; ci < cols.length; ci++) {
           if (fieldNameMatches((cols[ci].fieldName || "").toLowerCase(), target)) {
-            var cell = data.data[0][ci];
-            if (cell) {
+            var uniqueValues = {};
+            var uniqueList = [];
+            for (var r = 0; r < data.data.length; r++) {
+              var cell = data.data[r][ci];
+              if (!cell) continue;
               var val = cell.nativeValue !== undefined ? cell.nativeValue : (cell.formattedValue || cell.value);
-              if (val != null && String(val).trim() !== "") {
-                console.log("[COBRA] Dimension '" + fieldNames[n] + "' = " + val + " (from worksheet '" + worksheet.name + "' data)");
-                return String(val).trim();
+              if (val == null) continue;
+              var trimmed = String(val).trim();
+              if (!trimmed) continue;
+              if (!uniqueValues[trimmed]) {
+                uniqueValues[trimmed] = true;
+                uniqueList.push(trimmed);
               }
+            }
+            if (uniqueList.length === 1) {
+              console.log("[COBRA] Dimension '" + fieldNames[n] + "' = " + uniqueList[0] + " (unique value from worksheet '" + worksheet.name + "' data)");
+              return uniqueList[0];
+            }
+            if (uniqueList.length > 1) {
+              console.log("[COBRA] Dimension '" + fieldNames[n] + "' is ambiguous in worksheet '" + worksheet.name + "' data: " + JSON.stringify(uniqueList.slice(0, 10)));
             }
           }
         }
