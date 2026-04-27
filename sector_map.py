@@ -32,7 +32,7 @@ TIERS_BY_SOURCE = {
     },
     "policy_module": {
         "grid": "1,3,1",
-        "natural_gas": "3,5,1",   # Commercial/Institutional Oil
+        "natural_gas": "3,3,99",  # Fuel Combustion: Other, Commercial/Institutional Gas
     },
 }
 

@@ -155,6 +155,7 @@
 
             var state = null;
             var county = null;
+            var countyLockedToState = false; // true once we know county is intentionally absent
 
             var STATE_FIELDS = ["In.State", "State", "State_Abbr", "State Selection"];
             var COUNTY_FIELDS = ["In.County Name.2", "County", "County Name", "County Selection"];
@@ -218,7 +219,10 @@
             if (!county) {
               county = chooseMajorityValue(countyVotes);
               if (county) debugLines.push("County chosen from data worksheet filters: " + county + " [" + formatVoteSummary(countyVotes) + "]");
-              else if (countyFilterFoundOnDataWorksheets) debugLines.push("County filters found on data worksheets, but no single selected value was available");
+              else if (countyFilterFoundOnDataWorksheets) {
+                debugLines.push("County filters found on data worksheets, but no single selected value was available — treating as state-level");
+                countyLockedToState = true;
+              }
             }
             debugLines.push("After data worksheet filters: State=" + (state || "(none)") + ", County=" + (county || "(none)"));
 
@@ -278,6 +282,7 @@
                 if (countyFilterExists) {
                   debugLines.push("County filter exists but no single value selected — treating as state-level");
                   county = null;
+                  countyLockedToState = true;
                 }
               }
             }
@@ -300,7 +305,7 @@
               state = COBRA.findParamValue(params, STATE_PARAMS);
               if (state) debugLines.push("State from params (last resort): " + state);
             }
-            if (!county) {
+            if (!county && !countyLockedToState) {
               county = COBRA.findParamValue(params, COUNTY_PARAMS);
               if (county) debugLines.push("County from params (last resort): " + county);
             }
