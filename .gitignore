@@ -27,3 +27,6 @@ env/
 
 # Logs
 *.log
+
+# Motif workflow
+.motif/
