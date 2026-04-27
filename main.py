@@ -113,12 +113,13 @@ async def health_effects(
             # State format may not be an abbreviation/name (e.g. FIPS code).
             # Resolve state first, then retry county lookup before giving up.
             try:
+                # Resolve state to FIPS up front; used as fallback below if we
+                # can't normalize an abbreviation for the county lookup.
                 state_fips_resolved = region_to_fips(req.state)
                 st_abbrev = normalize_state_abbrev(req.state)
                 if st_abbrev:
                     fips = resolve_state_county(st_abbrev, county_name)
                 else:
-                    # Can't determine abbreviation — fall back to state-level
                     fips = state_fips_resolved
             except ValueError as e:
                 raise HTTPException(400, str(e))

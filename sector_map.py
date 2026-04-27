@@ -36,7 +36,9 @@ TIERS_BY_SOURCE = {
     },
 }
 
-# Worksheet name patterns -> fuel key (case-insensitive)
+# Worksheet-name → fuel-key heuristic. Currently unused at runtime: extensions
+# pass fuel keys explicitly via /health-effects. Kept as a fallback for any
+# future caller that needs to infer a fuel from a worksheet name.
 WORKSHEET_FUEL_PATTERNS = [
     ("grid", ["grid", "electric", "electricity"]),
     ("natural_gas", ["ng", "natural gas", "naturalgas"]),
@@ -100,7 +102,11 @@ def get_tiers_for_fuel_by_source(fuel: str, source: str | None) -> str:
 
 
 def worksheet_to_fuel(name: str) -> str | None:
-    """Map worksheet name to fuel key, or None if no match."""
+    """Map worksheet name to fuel key, or None if no match.
+
+    Unused at runtime — kept as a fallback for inferring fuel from worksheet
+    names. See WORKSHEET_FUEL_PATTERNS above.
+    """
     n = (name or "").lower()
     for fuel, patterns in WORKSHEET_FUEL_PATTERNS:
         if any(p in n for p in patterns):
