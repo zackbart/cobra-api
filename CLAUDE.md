@@ -1,5 +1,7 @@
 # CLAUDE.md — COBRA Proxy API
 
+> **Audience:** AI coding assistants working in this repo. Human onboarding lives in `README.md`. Keep this file focused on what an assistant needs to be useful: structure, conventions, and gotchas. Operational/handoff details (Railway access, who to ask) belong in the README.
+
 ## What this project is
 
 A FastAPI proxy that sits between Tableau dashboard extensions and the EPA COBRA (CO-Benefits Risk Assessment) API. Extensions send pollutant emission changes (PM2.5, SO2, NOx, VOC) for a location; this API calls EPA COBRA to calculate health impacts (mortality, morbidity, monetary value) and returns aggregated results.
@@ -25,6 +27,7 @@ uvicorn main:app --reload
 | `health_endpoints.py` | Aggregates COBRA Impacts into health endpoint tables |
 | `static/extension/shared.js` | Common JS for all Tableau extensions |
 | `static/extension/*.html` | Individual extension UIs (code-comparison, custom-module, policy-module, detailed-health) |
+| `county-baselines/` | Reference dataset: per-county electricity baselines from EPA COBRA (not used at runtime). See `county-baselines/README.md`. |
 
 ## Architecture notes
 
@@ -39,10 +42,11 @@ Production runs on **Railway** (`Procfile`: `uvicorn main:app --host 0.0.0.0 --p
 
 ## Testing
 
-Test scripts live in `scripts/`. They are integration tests that hit the deployed or local API:
+Test scripts live in `scripts/`:
 ```bash
-python scripts/test_deployed.py       # smoke test against production
+python scripts/test_implementation.py    # unit tests (mocked, no EPA calls)
 python scripts/test_state_resolution.py  # state/county routing tests
+python scripts/test_deployed.py          # smoke test against production
 ```
 
 ## Conventions
@@ -52,3 +56,5 @@ python scripts/test_state_resolution.py  # state/county routing tests
 - Docs in `docs/` (arch.md, tableau.md, troubleshooting.md)
 - No `.env` file — no secrets needed locally (EPA COBRA API tokens are ephemeral, fetched at runtime)
 - `findFilterValue` in `shared.js` checks all worksheets for each filter name and uses majority vote to avoid stale values from non-interactive worksheets
+- The Tableau extensions intentionally render a verbose "Debug info" panel and emit `[COBRA] …` console logs. This is **deliberate**: troubleshooting.md Issue 6 ("fuel oil missing pollutant values") is unverified in production, and the debug surface is the only way to diagnose worksheet-name mismatches in a deployed dashboard. Do not strip these without first confirming Issue 6 is resolved in real Tableau.
+- `requirements.txt` is fully pinned (top-level + transitives) for reproducible Railway builds. To upgrade: `pip install -U <pkg> && pip freeze > requirements.txt` in a clean venv, then re-add the header comment.

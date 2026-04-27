@@ -66,7 +66,7 @@ This documents specific issues encountered during development and their solution
 
 **Fix applied**: `matchPollutantName()` now matches full names (Sulfur/Sulphur, Nitrogen, Particulate, Volatile) in addition to abbreviations. Also logs unmatched measures.
 
-**Status**: Needs Tableau testing to confirm this resolves the issue.
+**Status**: **Open** — fix is in place but not yet verified end-to-end in a real Tableau dashboard. Until verified, the in-extension debug panel and `[COBRA]` console logs are intentionally retained (see "Debug Logging Reference" below). Remove the debug surface only after a maintainer confirms full-name matching works in production.
 
 ---
 

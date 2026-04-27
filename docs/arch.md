@@ -50,7 +50,7 @@ Detail Extension → GET /latest-results → full table view
 - `/health-effects` POST: Main endpoint. Accepts optional query param `source` (code_comparison, custom_module, policy_module). Resolves location to FIPS, runs one COBRA scenario per fuel concurrently via `asyncio.gather`, merges results. When `source` is set, tier selection uses per-extension mapping (see sector_map).
 - `/store-results` POST: Caches full response in memory, keyed by source extension name (code_comparison, custom_module, policy_module).
 - `/latest-results` GET: Returns cached results. Accepts `?source=` filter.
-- Static files mounted at `/extension/`.
+- Tableau extension static files served via a custom `GET /extension/{file_path:path}` route returning `FileResponse` with `Cache-Control: no-store` headers (not the usual `StaticFiles` mount). The no-cache headers exist because Tableau aggressively caches extension assets.
 
 ### `cobra_client.py` — EPA COBRA API Client
 - Uses `httpx.AsyncClient` with 120s timeout.
