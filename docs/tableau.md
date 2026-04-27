@@ -9,10 +9,10 @@ Each dashboard gets one extension. In Tableau Desktop:
 
 | Dashboard | Extension URL |
 |-----------|---------------|
-| Code Comparison | `https://cobra-api.up.railway.app/extension/CodeComparison.trex` |
-| Custom Module | `https://cobra-api.up.railway.app/extension/CustomModule.trex` |
-| Policy Module | `https://cobra-api.up.railway.app/extension/PolicyModule.trex` |
-| Detailed Health | `https://cobra-api.up.railway.app/extension/DetailedHealth.trex` |
+| Code Comparison | `https://web-production-5bcd2.up.railway.app/extension/CodeComparison.trex` |
+| Custom Module | `https://web-production-5bcd2.up.railway.app/extension/CustomModule.trex` |
+| Policy Module | `https://web-production-5bcd2.up.railway.app/extension/PolicyModule.trex` |
+| Detailed Health | `https://web-production-5bcd2.up.railway.app/extension/DetailedHealth.trex` |
 
 3. When prompted, allow the extension full data access.
 

@@ -2,9 +2,9 @@
 
 > Proxy API for the EPA [COBRA (CO-Benefits Risk Assessment)](https://www.epa.gov/cobra) screening tool. Calculates health impacts from changes in air pollutant emissions (PM2.5, SO2, NOx, VOC) and powers 4 Tableau dashboard extensions.
 
-[![Deploy](https://img.shields.io/badge/deploy-Railway-blueviolet)](https://cobra-api.up.railway.app)
+[![Deploy](https://img.shields.io/badge/deploy-Railway-blueviolet)](https://web-production-5bcd2.up.railway.app)
 
-**Production:** https://cobra-api.up.railway.app
+**Production:** https://web-production-5bcd2.up.railway.app
 **Docs:** [Architecture](docs/arch.md) | [Tableau Extensions](docs/tableau.md) | [Troubleshooting](docs/troubleshooting.md)
 
 ---
@@ -156,7 +156,7 @@ There is no test framework configured (no pytest config) — each script is runn
 
 ### Railway / deploy
 
-- Production URL: https://cobra-api.up.railway.app
+- Production URL: https://web-production-5bcd2.up.railway.app
 - Deploy: `railway up` from the project root. The repo has both `Procfile` and `railway.json` — they specify the same start command (`uvicorn main:app --host 0.0.0.0 --port $PORT`).
 - Health check: `GET /health`.
 - Timeout: 15 min (set in Railway service settings to accommodate slow EPA calls).

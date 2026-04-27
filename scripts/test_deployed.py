@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 
-API_BASE = "https://cobra-api.up.railway.app"
+API_BASE = "https://web-production-5bcd2.up.railway.app"
 TIMEOUT = httpx.Timeout(120)  # EPA COBRA can be slow
 
 
